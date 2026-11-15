@@ -1,0 +1,88 @@
+{
+  "cases": {
+    "01-registry": {
+      "key": "registry",
+      "origin_utc_ms": 0,
+      "sha256": "7e57bc1e3d9c540188dcebfc67d5ebc01ccde9cc629d18bfba8f8dc2aa4c3be8",
+      "sources": [],
+      "why": "the empty registry"
+    },
+    "02-whole-d0": {
+      "key": "4-0-0-0-0",
+      "origin_utc_ms": 0,
+      "sha256": "36baa17acf7f67c21261a8045125d74a89294e38665da9e20be3bd85f5fd2b66",
+      "sources": ["8/0/0", "8/0/1"],
+      "why": "the whole frame at depth 0, both tiles of the top level"
+    },
+    "03-octant-d3": {
+      "key": "4-3-4-4-4",
+      "origin_utc_ms": 0,
+      "sha256": "438f62828a1526c595036cbeb74dd8d22cc004fc3dec295f41572d1d61815514",
+      "sources": ["8/0/0", "8/0/1"],
+      "why": "an octant from the center to the surface, depth 3"
+    },
+    "04-island-d6": {
+      "key": "4-6-40-32-32",
+      "origin_utc_ms": 0,
+      "sha256": "c254b95f9c53721805d5bde58009e67328898b8d81fabb2157e045826c09bad7",
+      "sources": ["5/2/5"],
+      "why": "the surface where the frame's x axis leaves it, depth 6, level 5"
+    },
+    "05-shelf-d9": {
+      "key": "4-9-320-255-256",
+      "origin_utc_ms": 0,
+      "sha256": "f2b82bc2ed15cb0f45ac757ace285cfe3f5666a3bf549dd236de3a0942df8aee",
+      "sources": ["2/22/44", "2/22/45"],
+      "why": "island and seafloor across the prime meridian, depth 9, level 2"
+    },
+    "06-interior-d8": {
+      "key": "4-8-128-128-128",
+      "origin_utc_ms": 0,
+      "sha256": "09724f293a200fcf08dba01d03bb025cc16fa29bbfaa0016e3799e8f47d671ff",
+      "sources": [],
+      "why": "an interior cell at the center, the profile alone, no sources"
+    },
+    "07-coast-d11": {
+      "key": "4-11-1280-1027-1025",
+      "origin_utc_ms": 0,
+      "sha256": "343a4104f16a712c94b4293fee8f667d9e7f94476278859b94367ca19fb051e5",
+      "sources": ["0/89/180"],
+      "why": "a coastline cell: land and seafloor albedo, depth 11, level 0"
+    },
+    "08-tile-edge-d14": {
+      "key": "4-14-10242-8191-8209",
+      "origin_utc_ms": 0,
+      "sha256": "b916945817bb65c1753afd2f303630a15e7550f7965a3d4274e65c68d1cfcc36",
+      "sources": ["0/89/179", "0/89/180"],
+      "why": "a cell against the edge between two level 0 tile columns, depth 14"
+    },
+    "09-peak-d16": {
+      "key": "4-16-40979-32775-32774",
+      "origin_utc_ms": 0,
+      "sha256": "a6ed62ab6e8d0c41e0bc03181e4e761a5805c6c1afe7a140fa02cb3ad2081cad",
+      "sources": ["0/89/180"],
+      "why": "the cell holding the fixture summit at 8000 m, depth 16"
+    },
+    "10-trench-d16": {
+      "key": "4-16-40947-33125-32768",
+      "origin_utc_ms": 0,
+      "sha256": "483d3007897f3966f21edfe1f0f19981ab255a77909d894a82ef2634aefe7bab",
+      "sources": ["0/89/182", "0/90/182"],
+      "why": "the floor of the fixture trench at -10900 m, depth 16"
+    },
+    "11-surface-d21": {
+      "key": "4-21-1311018-1047201-1049940",
+      "origin_utc_ms": 0,
+      "sha256": "35748ecc0539481d7ea20bbc4b2fef5efe66c9d37f42f92b1be2797b03b6ca2d",
+      "sources": ["0/89/179"],
+      "why": "the island's surface at the deepest depth, samples 0.76 m apart"
+    },
+    "12-above-d12": {
+      "key": "4-12-2565-2045-2050",
+      "origin_utc_ms": 0,
+      "sha256": "18694a2b24cfd2f8afd3992ae770fca0a8ddcb59f50a0fe82e9472db336e0eae",
+      "sources": [],
+      "why": "an empty cell more than 9 km above the surface, no sources"
+    }
+  }
+}
