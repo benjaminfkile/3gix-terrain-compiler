@@ -328,3 +328,23 @@ fn coast_cell_has_land_and_seafloor() {
     }
     assert!(land && sea);
 }
+
+#[test]
+fn the_coarse_frame_shows_its_surface_not_its_hot_interior() {
+    // The depth-0 section, the one a renderer lights with: the interior's
+    // thousands of kelvin stay inside, and the outer samples radiate at the
+    // surface temperature, so the frame sends out no light at 1000 K or
+    // above (gx_core::emission).
+    let key = cell(&format!("{FRAME_ID}-0-0-0-0"));
+    let s = build(&key);
+    let samples = s.samples().unwrap();
+    let hottest = samples
+        .iter()
+        .map(|x| x.temperature.value())
+        .fold(0.0, f64::max);
+    assert!(hottest > 1000.0, "the interior is hot: {hottest}");
+    assert_eq!(
+        gx_core::emission::summarize(&s, gx_core::units::Kelvin::new(1000.0)),
+        None
+    );
+}

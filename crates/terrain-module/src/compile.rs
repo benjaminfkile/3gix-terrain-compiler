@@ -38,7 +38,12 @@
 //!
 //! Density is the sum of the solid points' densities divided by
 //! `SUBSAMPLES^3`: the solid fraction times the local density. Temperature
-//! and albedo are density-weighted means over the solid points. State is
+//! and albedo are density-weighted means over the solid points. The
+//! radiating temperature (`matter-format.md` section 3.3) is the
+//! temperature at the model radius of the sub-cube's farthest corner:
+//! opaque matter radiates from its outer side, so a coarse sample that
+//! reaches the surface shows the surface temperature, not the mean of the
+//! hot rock it holds. State is
 //! solid, roughness [`ROUGHNESS`], attenuation 0 (opaque). A sample with no
 //! solid point is vacuum. A cell whose samples are all vacuum is an empty
 //! section.
@@ -247,10 +252,24 @@ fn sample_cell(g: &CellGeometry, mut surface: Option<&mut Surface>) -> Result<Sa
                     }
                 }
                 out.push(if rho > 0.0 {
+                    // Opaque matter radiates from its outer side: the
+                    // temperature at the sub-cube's farthest model radius
+                    // (the surface value wherever the sub-cube reaches
+                    // above the ground).
+                    let e = g.edge.value() / n as f64;
+                    let far = |origin: f64, i: usize, axis: f64| -> f64 {
+                        let lo = (origin + e * i as f64) / axis;
+                        let hi = (origin + e * (i + 1) as f64) / axis;
+                        (lo * lo).max(hi * hi)
+                    };
+                    let q_far =
+                        far(g.origin.x, x, A) + far(g.origin.y, y, A) + far(g.origin.z, z, B);
+                    let r_top = SURFACE_RADIUS * q_far.sqrt();
                     Sample {
                         density: Density::new(rho / total),
                         state: State::Solid,
                         temperature: Kelvin::new(rho_t / rho),
+                        radiating_temperature: Kelvin::new(interior::temperature(r_top)),
                         albedo: rho_a.map(|a| Ratio::new(a / rho)),
                         roughness: Ratio::new(ROUGHNESS),
                         attenuation: Attenuation::new(0.0),
