@@ -348,3 +348,15 @@ fn the_coarse_frame_shows_its_surface_not_its_hot_interior() {
         None
     );
 }
+
+#[test]
+fn cells_just_west_of_the_antimeridian_list_the_tiles_they_read() {
+    // Cells whose longitudes end exactly at -180 degrees: the reader wraps
+    // to the first tile column, the lister used to wrap to the last tile's
+    // padding columns only.
+    for k in ["4-5-12-15-18", "4-6-28-31-38", "4-6-28-31-39"] {
+        let key = cell(k);
+        let tiles = fixture::tiles(&sources(&ChunkKey::Cell(key)));
+        assert!(section(&key, &tiles).is_ok(), "{k}");
+    }
+}

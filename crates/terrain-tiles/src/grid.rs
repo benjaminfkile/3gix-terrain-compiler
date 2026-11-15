@@ -315,8 +315,20 @@ impl Grid {
             .collect();
         tile_rows.sort_unstable();
         tile_rows.dedup();
+        // A column past the antimeridian has two lattice columns: the one
+        // [`Grid::lattice_col`] gives for this index, and the one it gives
+        // for the same longitude counted from the other side (a reader that
+        // starts west of the antimeridian lands in the padding columns of
+        // the last tile, one that starts east of it in the first tile).
+        // List both.
+        let period = i64::from(self.wrap_cols(level).max(1));
         let mut tile_cols: Vec<u32> = cols
-            .map(|c| self.lattice_col(level, c) / TILE_SIZE)
+            .flat_map(|c| {
+                [
+                    self.lattice_col(level, c) / TILE_SIZE,
+                    self.lattice_col(level, c.rem_euclid(period)) / TILE_SIZE,
+                ]
+            })
             .collect();
         tile_cols.sort_unstable();
         tile_cols.dedup();
