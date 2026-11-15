@@ -1,0 +1,10 @@
+[package]
+name = "terrain-module"
+version = "0.1.0"
+edition.workspace = true
+publish.workspace = true
+description = "Placeholder for the terrain module (task H2): it will read elevation tiles and build one frame's matter."
+
+[lib]
+name = "terrain_module"
+path = "src/lib.rs"

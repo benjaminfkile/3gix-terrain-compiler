@@ -1,1 +1,18 @@
-target/
+# Rust
+/target
+**/target
+Cargo.lock.orig
+
+# Tiler output
+/out
+
+# Editors and OS
+.vscode/
+.idea/
+*.swp
+.DS_Store
+
+# Local env
+.env
+.env.*
+!.env.example

@@ -1,0 +1,25 @@
+[package]
+name = "terrain-tiler"
+version = "0.1.0"
+edition.workspace = true
+publish.workspace = true
+description = "Cuts the GEBCO elevation grid into the terrain tile pyramid and uploads it to a hub as a source set."
+
+[lib]
+name = "terrain_tiler"
+path = "src/lib.rs"
+
+[[bin]]
+name = "terrain-tiler"
+path = "src/main.rs"
+
+[dependencies]
+terrain-tiles = { path = "../terrain-tiles" }
+gx-core = { workspace = true }
+# HDF5 1.14 built from source with zlib (the dataset's NetCDF4 file is
+# deflate compressed), so no system package is needed. Pinned below the
+# releases that bundle HDF5 2, whose build needs a newer CMake than the
+# runner image has.
+hdf5 = { package = "hdf5-metno", version = "=0.9.4", features = ["static", "zlib"] }
+ndarray = "0.16"
+ureq = { version = "3", default-features = false, features = ["rustls"] }

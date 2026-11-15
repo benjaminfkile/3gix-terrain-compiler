@@ -1,0 +1,24 @@
+[workspace]
+resolver = "2"
+members = ["crates/terrain-tiles", "crates/terrain-tiler", "crates/terrain-module", "tools/tiles-wasm-check"]
+
+[workspace.package]
+edition = "2021"
+publish = false
+
+[workspace.dependencies]
+# Pinned by revision. Without default features: the library's own C ABI and
+# wasm-bindgen exports would bring imports into a module (core
+# docs/modules.md).
+gx-core = { git = "https://github.com/benjaminfkile/3gix-core", rev = "cdb35838bfdd693312df3c771b8a2759512ee9fd", default-features = false }
+# The same pin as gx-core (core docs/determinism.md): the compressed tile
+# bytes depend on the zstd crate, its bundled C library, and the level.
+zstd = "=0.14.0"
+
+# Cutting a grid is mostly zstd and HDF5 decompression; unoptimized, the
+# tests would be slow. Optimize dependencies in test builds.
+[profile.dev.package."*"]
+opt-level = 3
+
+[profile.dev]
+opt-level = 2
