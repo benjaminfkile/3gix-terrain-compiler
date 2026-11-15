@@ -1,0 +1,14 @@
+[package]
+name = "tiles-wasm-check"
+version = "0.1.0"
+edition.workspace = true
+publish.workspace = true
+description = "The terrain-tiles determinism digest as a WebAssembly export with no imports, for the Node check in scripts/ci.sh."
+
+[lib]
+name = "tiles_wasm_check"
+path = "src/lib.rs"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+terrain-tiles = { path = "../../crates/terrain-tiles" }

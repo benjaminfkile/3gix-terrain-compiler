@@ -1,0 +1,10 @@
+[package]
+name = "terrain-tiles"
+version = "0.1.0"
+edition.workspace = true
+publish.workspace = true
+description = "The terrain tile format: grid geometry, tile bytes, ids, sampling, and bicubic interpolation, shared by the tiler and the module."
+
+[dependencies]
+gx-core = { workspace = true }
+zstd = { workspace = true }
