@@ -17,6 +17,8 @@
 use std::collections::{BTreeMap, HashMap};
 
 use terrain_tiles::interp::catmull_rom;
+#[cfg(test)]
+use terrain_tiles::TileKey;
 use terrain_tiles::{Grid, Presence, Tile, TileError};
 
 use crate::geodesy::{H_MAX, H_MIN};
@@ -167,6 +169,65 @@ mod tests {
             let a = s.elevation(lat, lon).unwrap();
             let b = terrain_tiles::bicubic_present(&GRID, &tiles, &presence, 0, lat, lon).unwrap();
             assert_eq!(a.to_bits(), b.to_bits(), "{i}");
+        }
+    }
+
+    #[test]
+    fn reads_only_listed_tiles_where_fine_tiles_are_missing() {
+        // A sparse level 0 map around the north pole and around 0, 0: every
+        // third tile in a band, so boxes see every mix of present and
+        // missing neighbors on every fine level.
+        let mut present = std::collections::BTreeSet::new();
+        for r in 0..12u32 {
+            for c in 0..GRID.tile_cols(0) {
+                if (r * 7 + c * 13) % 3 == 0 {
+                    present.insert((r, c));
+                }
+            }
+        }
+        for r in 350..370u32 {
+            for c in 710..730u32 {
+                if (r * 5 + c * 11) % 3 == 0 {
+                    present.insert((r, c));
+                }
+            }
+        }
+        let presence = Presence::from_level0(&GRID, &present);
+        let d = core::f64::consts::PI / 180.0;
+        let half = 0.004 * d;
+        let mut centers = Vec::new();
+        for i in 0..24 {
+            // Near the pole, across tile edges at every fine level.
+            centers.push((
+                89.98 * d - f64::from(i) * 0.37 * d,
+                (f64::from(i) * 7.9 - 120.0) * d,
+            ));
+            // Near 0, 0.
+            centers.push((
+                (f64::from(i) * 0.23 - 2.5) * d,
+                (f64::from(i) * 0.31 - 3.0) * d,
+            ));
+        }
+        for (k, &(lat, lon)) in centers.iter().enumerate() {
+            let (la0, la1) = (
+                (lat - half).max(-0.5 * core::f64::consts::PI),
+                (lat + half).min(0.5 * core::f64::consts::PI),
+            );
+            let ids = presence.tiles_for_region(&GRID, 0, la0, la1, lon - half, lon + half);
+            let zero = |id: u64| {
+                let key = TileKey::from_id(id).unwrap();
+                Tile::new(key, vec![0i16; GRID.tile_samples()]).unwrap()
+            };
+            let tiles: BTreeMap<u64, Tile> = ids.iter().map(|&id| (id, zero(id))).collect();
+            let mut s = Surface::new(GRID, 0, &tiles, &presence);
+            for i in 0..=8 {
+                for j in 0..=8 {
+                    let a = la0 + (la1 - la0) * f64::from(i) / 8.0;
+                    let o = lon - half + 2.0 * half * f64::from(j) / 8.0;
+                    s.elevation(a, o)
+                        .unwrap_or_else(|e| panic!("box {k} at {a} {o}: {e}"));
+                }
+            }
         }
     }
 }

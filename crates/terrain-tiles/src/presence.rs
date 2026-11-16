@@ -184,6 +184,8 @@ impl Presence {
     ) -> Vec<u64> {
         let mut out = BTreeSet::new();
         let mut level = level;
+        let (mut lat_min, mut lat_max) = (lat_min.min(lat_max), lat_min.max(lat_max));
+        let (mut lon_min, mut lon_max) = (lon_min.min(lon_max), lon_min.max(lon_max));
         loop {
             let mut missing = false;
             for id in grid.tiles_for_region(level, lat_min, lat_max, lon_min, lon_max) {
@@ -197,6 +199,15 @@ impl Presence {
             if !missing || level >= grid.top_level() {
                 break;
             }
+            // A missing sample read on `level` lies up to two of its
+            // spacings and a half outside the box, and its own stencil on
+            // the next level reaches out from there: widen the box by three
+            // spacings of `level` before listing the next one.
+            let reach = 3.0 * grid.spacing(level);
+            lat_min -= reach;
+            lat_max += reach;
+            lon_min -= reach;
+            lon_max += reach;
             level += 1;
         }
         out.into_iter().collect()
