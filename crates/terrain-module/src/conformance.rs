@@ -53,12 +53,12 @@ pub const VECTORS: [Vector; 12] = [
     v(
         "04-island-d6",
         "4-6-40-32-32",
-        "the surface where the frame's x axis leaves it, depth 6, level 5",
+        "the surface where the frame's x axis leaves it, depth 6, level 9",
     ),
     v(
         "05-shelf-d9",
         "4-9-320-255-256",
-        "island and seafloor across the prime meridian, depth 9, level 2",
+        "island and seafloor across the prime meridian, depth 9, level 6",
     ),
     v(
         "06-interior-d8",
@@ -68,12 +68,12 @@ pub const VECTORS: [Vector; 12] = [
     v(
         "07-coast-d11",
         "4-11-1280-1027-1025",
-        "a coastline cell: land and seafloor albedo, depth 11, level 0",
+        "a coastline cell: land and seafloor albedo, depth 11, level 4",
     ),
     v(
         "08-tile-edge-d14",
         "4-14-10242-8191-8209",
-        "a cell against the edge between two level 0 tile columns, depth 14",
+        "a cell against the edge between two level 1 tile columns, depth 14",
     ),
     v(
         "09-peak-d16",

@@ -23,7 +23,6 @@
 
 use core::f64::consts::PI;
 
-use terrain_tiles::grid::{TILE_SAMPLES, TILE_SIZE};
 use terrain_tiles::{Tile, TileKey};
 
 use crate::plan::GRID;
@@ -49,7 +48,7 @@ pub const SUMMIT_ELEVATION: i16 = 8000;
 
 /// The summit's level 0 sample: `(row, col)`. Its center is at about
 /// latitude 0.0479 and longitude 0.0521 degrees.
-pub const SUMMIT_SAMPLE: (u32, u32) = (21588, 43212);
+pub const SUMMIT_SAMPLE: (u32, u32) = (345416, 691400);
 
 /// The summit bump's radius, degrees.
 pub const SUMMIT_RADIUS: f64 = 0.04;
@@ -116,11 +115,11 @@ pub fn tile(id: u64) -> Tile {
     let key = TileKey::from_id(id).expect("a tile id");
     assert!(key.level <= GRID.top_level() && key.row < GRID.tile_rows(key.level));
     assert!(key.col < GRID.tile_cols(key.level));
-    let mut samples = Vec::with_capacity(TILE_SAMPLES);
-    for i in 0..TILE_SIZE {
-        for j in 0..TILE_SIZE {
-            let (lat, lon) =
-                GRID.center(key.level, key.row * TILE_SIZE + i, key.col * TILE_SIZE + j);
+    let n = GRID.tile_size();
+    let mut samples = Vec::with_capacity(GRID.tile_samples());
+    for i in 0..n {
+        for j in 0..n {
+            let (lat, lon) = GRID.center(key.level, key.row * n + i, key.col * n + j);
             let v = elevation(lat.max(-PI / 2.0), lon).round();
             samples.push(v.clamp(f64::from(i16::MIN), f64::from(i16::MAX)) as i16);
         }
@@ -148,12 +147,12 @@ mod tests {
         let t = tile(
             TileKey {
                 level: 0,
-                row: 89,
-                col: 180,
+                row: SUMMIT_SAMPLE.0 / 960,
+                col: SUMMIT_SAMPLE.1 / 960,
             }
             .id(),
         );
-        assert_eq!(t.get(SUMMIT_SAMPLE.0 % 240, SUMMIT_SAMPLE.1 % 240), 8000);
+        assert_eq!(t.get(SUMMIT_SAMPLE.0 % 960, SUMMIT_SAMPLE.1 % 960), 8000);
         // Far tiles are flat and compress to almost nothing.
         let far = tile(
             TileKey {
@@ -163,6 +162,6 @@ mod tests {
             }
             .id(),
         );
-        assert!(far.encode().len() < 1000);
+        assert!(far.encode().len() < 2000);
     }
 }

@@ -5,7 +5,23 @@
 use gx_core::key::{CellKey, ChunkKey};
 use gx_core::matter::{self, Section, State};
 use gx_core::registry;
-use terrain_module::compile::{compile, section, sources, LAND_ALBEDO, SEAFLOOR_ALBEDO};
+use std::collections::BTreeMap;
+
+use gx_core::key::CellKey as Key;
+use terrain_module::compile::{self, CompileError, LAND_ALBEDO, SEAFLOOR_ALBEDO};
+use terrain_tiles::{Presence, Tile};
+
+// The fixture world fills every tile, so these tests read it as a source set
+// whose fine tiles all exist.
+fn sources(key: &ChunkKey) -> Vec<u64> {
+    compile::sources_with(key, &Presence::all())
+}
+fn section(key: &Key, tiles: &BTreeMap<u64, Tile>) -> Result<Section, CompileError> {
+    compile::section_with(key, tiles, &Presence::all())
+}
+fn compile(key: &ChunkKey, tiles: &BTreeMap<u64, Tile>) -> Result<Vec<u8>, CompileError> {
+    compile::compile_with(key, tiles, &Presence::all())
+}
 use terrain_module::fixture::{self, DEG, SUMMIT_ELEVATION};
 use terrain_module::frame::{FRAME_ID, RESOLUTION};
 use terrain_module::geodesy::{frame_point, geodetic, Geodetic};
@@ -110,8 +126,8 @@ fn fill(s: &Section, y: u32, z: u32) -> f64 {
 
 #[test]
 fn cells_across_a_tile_edge_join_without_a_step() {
-    // The face y = 0 is longitude 0, the edge between level 0 tile
-    // columns 179 and 180.
+    // The face y = 0 is longitude 0, the edge between level 1 tile
+    // columns 359 and 360 (depth 14 reads level 1).
     let west = cell("4-14-10242-8191-8209");
     let east = cell("4-14-10242-8192-8209");
     let col = |k: &CellKey| -> Vec<u32> {
@@ -120,7 +136,7 @@ fn cells_across_a_tile_edge_join_without_a_step() {
             .map(|&id| TileKey::from_id(id).unwrap().col)
             .collect()
     };
-    assert!(col(&west).contains(&179) && col(&east).contains(&180));
+    assert!(col(&west).contains(&359) && col(&east).contains(&360));
     let (a, b) = (build(&west), build(&east));
     assert_eq!(a.origin().y + a.edge().value(), 0.0);
     assert_eq!(b.origin().y, 0.0);
@@ -306,7 +322,8 @@ fn listed_tiles_cover_every_read() {
         }),
     )
     .unwrap();
-    assert!(sources(&ChunkKey::Cell(pole)).len() >= 180);
+    // Depth 10 reads level 5: 45 tile columns around the globe.
+    assert!(sources(&ChunkKey::Cell(pole)).len() >= 45);
 }
 
 /// Samples are 777 m tall in the coast cell, more than the 300 m plateau,

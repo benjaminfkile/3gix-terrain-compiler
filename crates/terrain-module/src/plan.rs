@@ -26,9 +26,11 @@
 //! [`level_for_depth`]: the coarsest level whose sample spacing at the
 //! equator is no larger than the cell's sample spacing, so a level never
 //! has detail the samples cannot show by more than a factor of two, and
-//! level 0 (the data's own spacing, about 463 m) from depth 11 on. Below
+//! level 0 (the data's own spacing, about 29 m) from depth 15 on. Below
 //! the data's spacing the surface is the smooth bicubic interpolation of
-//! level 0: nothing is invented.
+//! level 0: nothing is invented. Where a fine tile does not exist (open
+//! ocean, `terrain_tiles::presence`) the surface reads the next coarser
+//! level that does, down to level 4, GEBCO's own spacing.
 //!
 //! # Tiles
 //!
@@ -53,13 +55,30 @@ use core::f64::consts::{FRAC_PI_2, PI, TAU};
 
 use gx_core::key::{CellGeometry, CellKey};
 use gx_core::units::Meters;
-use terrain_tiles::Grid;
+use std::sync::OnceLock;
+
+use terrain_tiles::{Grid, Presence};
 
 use crate::frame::{root_extent, FRAME_ID, MAX_DEPTH, RESOLUTION, ROOT_EXTENT};
 use crate::geodesy::{atan2, A, B, Q_SOLID, Q_VACUUM, TAN_RATIO};
 
-/// The elevation grid the module reads: the cut dataset.
-pub const GRID: Grid = Grid::GEBCO;
+/// The elevation grid the module reads: GLO-30 on land, GEBCO under the
+/// oceans ([`Grid::GLO30`]).
+pub const GRID: Grid = Grid::GLO30;
+
+/// The presence map of the source set this module version reads
+/// (`terrain_tiles::presence`), written by `terrain-tiler glo30-finish`.
+/// It must be the map of the manifest the layer uses: the module asks only
+/// for fine tiles it lists.
+const PRESENCE_BYTES: &[u8] = include_bytes!("../data/glo30-presence.bin");
+
+/// The decoded [`PRESENCE_BYTES`].
+pub fn presence() -> &'static Presence {
+    static P: OnceLock<Presence> = OnceLock::new();
+    P.get_or_init(|| {
+        Presence::decode(&GRID, PRESENCE_BYTES).expect("the embedded presence map is valid")
+    })
+}
 
 /// Radians added on every side of a cell's latitude and longitude range,
 /// about 6 mm on the surface: far more than the rounding of the bound and
@@ -111,8 +130,13 @@ pub fn geometry(key: &CellKey) -> Result<CellGeometry, PlanError> {
     Ok(key.geometry(Meters::new(extent)))
 }
 
-/// The plan of one cell.
+/// The plan of one cell, with the module's own presence map.
 pub fn plan(key: &CellKey) -> Result<Plan, PlanError> {
+    plan_with(key, presence())
+}
+
+/// The plan of one cell over a source set whose fine tiles are `presence`.
+pub fn plan_with(key: &CellKey, presence: &Presence) -> Result<Plan, PlanError> {
     let g = geometry(key)?;
     if key.frame_id != FRAME_ID || key.depth > MAX_DEPTH {
         return Ok(Plan::Empty);
@@ -128,13 +152,18 @@ pub fn plan(key: &CellKey) -> Result<Plan, PlanError> {
     let level = level_for_depth(key.depth);
     let (lat_lo, lat_hi) = b.latitude_range();
     let (lon_lo, lon_hi) = b.longitude_range();
-    let tiles = GRID.tiles_for_region(level, lat_lo, lat_hi, lon_lo, lon_hi);
+    let tiles = presence.tiles_for_region(&GRID, level, lat_lo, lat_hi, lon_lo, lon_hi);
     Ok(Plan::Surface { level, tiles })
 }
 
 /// The tiles a cell needs: the plan's tiles, or none.
 pub fn sources(key: &CellKey) -> Vec<u64> {
-    match plan(key) {
+    sources_with(key, presence())
+}
+
+/// [`sources`] over a source set whose fine tiles are `presence`.
+pub fn sources_with(key: &CellKey, presence: &Presence) -> Vec<u64> {
+    match plan_with(key, presence) {
         Ok(Plan::Surface { tiles, .. }) => tiles,
         _ => Vec::new(),
     }
@@ -294,7 +323,7 @@ mod tests {
         let levels: Vec<u8> = (0..=21).map(level_for_depth).collect();
         assert_eq!(
             levels,
-            [8, 8, 8, 8, 7, 6, 5, 4, 3, 2, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+            [10, 10, 10, 10, 10, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0, 0, 0, 0, 0, 0, 0]
         );
     }
 
@@ -328,7 +357,7 @@ mod tests {
         .is_err());
         // The whole frame needs the top level, both tiles.
         match plan(&key(0, 0, 0, 0)) {
-            Ok(Plan::Surface { level: 8, tiles }) => assert_eq!(tiles.len(), 2),
+            Ok(Plan::Surface { level: 10, tiles }) => assert_eq!(tiles.len(), 2),
             other => panic!("{other:?}"),
         }
     }

@@ -14,7 +14,9 @@
 //! # Bytes
 //!
 //! One zstd frame at [`ZSTD_LEVEL`] that decompresses to exactly
-//! [`RAW_LEN`] bytes:
+//! [`raw_len`] of the tile's size bytes, the size being one of [`SIZES`]
+//! (240 for the GEBCO pyramid, 960 for GLO-30; the length tells them
+//! apart):
 //!
 //! | Offset | Size | Field |
 //! |---|---|---|
@@ -24,7 +26,7 @@
 //! | 7 | 1 | reserved, 0 |
 //! | 8 | 4 | row, `u32` LE |
 //! | 12 | 4 | col, `u32` LE |
-//! | 16 | 115200 | 240 x 240 elevations, `i16` LE, meters, north row first, west column first |
+//! | 16 | 2 N^2 | N x N elevations, `i16` LE, meters, north row first, west column first |
 //!
 //! Elevations are meters above the dataset's vertical datum, negative below
 //! it. The compressed bytes depend on the zstd crate and its bundled C
@@ -35,7 +37,7 @@
 use core::fmt;
 use std::io::Read;
 
-use crate::grid::{TILE_SAMPLES, TILE_SIZE};
+use crate::grid::{GLO30_TILE_SIZE, TILE_SIZE};
 
 /// The four magic bytes that open a tile: `3GTE` in ASCII.
 pub const MAGIC: [u8; 4] = *b"3GTE";
@@ -46,8 +48,24 @@ pub const VERSION: u16 = 1;
 /// Length of the tile header in bytes.
 pub const HEADER_LEN: usize = 16;
 
-/// Length of a tile before compression: the header and the samples.
-pub const RAW_LEN: usize = HEADER_LEN + 2 * TILE_SAMPLES;
+/// The tile sizes a tile may have, samples per edge: [`TILE_SIZE`] (the
+/// GEBCO pyramid) and [`GLO30_TILE_SIZE`]. The size is not stored; it
+/// follows from the length.
+pub const SIZES: [u32; 2] = [TILE_SIZE, GLO30_TILE_SIZE];
+
+/// Length of a tile of `size` samples per edge before compression: the
+/// header and the samples.
+pub const fn raw_len(size: u32) -> usize {
+    HEADER_LEN + 2 * (size as usize) * (size as usize)
+}
+
+/// The tile size whose samples number `n`, if it is one of [`SIZES`].
+fn size_of_samples(n: usize) -> Option<u32> {
+    SIZES
+        .iter()
+        .copied()
+        .find(|&s| (s as usize) * (s as usize) == n)
+}
 
 /// The zstd level every tile is compressed at. The same value the core
 /// library uses for matter sections, fixed here so the tile bytes do not
@@ -99,7 +117,7 @@ impl fmt::Display for TileKey {
 /// Why tile bytes did not decode, or why a tile could not be read.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum TileError {
-    /// The bytes are not exactly one zstd frame of [`RAW_LEN`] bytes.
+    /// The bytes are not exactly one zstd frame of a tile's length.
     Compression(String),
     /// The magic is not `3GTE`.
     BadMagic([u8; 4]),
@@ -114,7 +132,7 @@ pub enum TileError {
         /// The tile the header names.
         found: TileKey,
     },
-    /// The samples are not [`TILE_SAMPLES`] long.
+    /// The samples are not a square of one of the [`SIZES`].
     SampleCount(usize),
     /// A row or column above [`MAX_INDEX`].
     IndexTooLarge(TileKey),
@@ -137,7 +155,7 @@ impl fmt::Display for TileError {
                 write!(f, "tile: header names {found}, expected {expected}")
             }
             TileError::SampleCount(n) => {
-                write!(f, "tile: {n} samples, a tile holds {TILE_SAMPLES}")
+                write!(f, "tile: {n} samples is not a tile of {SIZES:?} squared")
             }
             TileError::IndexTooLarge(k) => write!(f, "tile: {k} does not fit a tile id"),
             TileError::Missing(id) => write!(f, "tile: id {id:#x} was not supplied"),
@@ -151,21 +169,24 @@ impl std::error::Error for TileError {}
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Tile {
     key: TileKey,
+    size: u32,
     samples: Box<[i16]>,
 }
 
 impl Tile {
-    /// A tile from its key and [`TILE_SAMPLES`] elevations, north row
+    /// A tile from its key and `size * size` elevations (`size` one of
+    /// [`SIZES`]), north row
     /// first, west column first.
     pub fn new(key: TileKey, samples: Vec<i16>) -> Result<Tile, TileError> {
         if key.row > MAX_INDEX || key.col > MAX_INDEX {
             return Err(TileError::IndexTooLarge(key));
         }
-        if samples.len() != TILE_SAMPLES {
+        let Some(size) = size_of_samples(samples.len()) else {
             return Err(TileError::SampleCount(samples.len()));
-        }
+        };
         Ok(Tile {
             key,
+            size,
             samples: samples.into_boxed_slice(),
         })
     }
@@ -186,15 +207,20 @@ impl Tile {
     }
 
     /// The elevation at `row`, `col` inside the tile, meters. Both must be
-    /// below [`TILE_SIZE`].
+    /// below [`Tile::size`].
     pub fn get(&self, row: u32, col: u32) -> i16 {
-        assert!(row < TILE_SIZE && col < TILE_SIZE, "inside the tile");
-        self.samples[(row * TILE_SIZE + col) as usize]
+        assert!(row < self.size && col < self.size, "inside the tile");
+        self.samples[(row * self.size + col) as usize]
     }
 
-    /// The uncompressed bytes: header and samples ([`RAW_LEN`] bytes).
+    /// Samples along each edge.
+    pub fn size(&self) -> u32 {
+        self.size
+    }
+
+    /// The uncompressed bytes: header and samples ([`raw_len`] bytes).
     pub fn raw_bytes(&self) -> Vec<u8> {
-        let mut out = Vec::with_capacity(RAW_LEN);
+        let mut out = Vec::with_capacity(raw_len(self.size));
         out.extend_from_slice(&MAGIC);
         out.extend_from_slice(&VERSION.to_le_bytes());
         out.push(self.key.level);
@@ -214,7 +240,7 @@ impl Tile {
             .expect("in-memory zstd compression of a bounded block does not fail")
     }
 
-    /// Decodes tile bytes: exactly one zstd frame of [`RAW_LEN`] bytes, the
+    /// Decodes tile bytes: exactly one zstd frame of a tile's length, the
     /// magic, the version, and the reserved byte.
     pub fn decode(bytes: &[u8]) -> Result<Tile, TileError> {
         let raw = decompress(bytes)?;
@@ -261,7 +287,8 @@ impl Tile {
     }
 }
 
-/// Exactly one zstd frame that yields exactly [`RAW_LEN`] bytes.
+/// Exactly one zstd frame that yields exactly the length of a tile of one of
+/// the [`SIZES`].
 fn decompress(bytes: &[u8]) -> Result<Vec<u8>, TileError> {
     let frame_len = zstd::zstd_safe::find_frame_compressed_size(bytes).map_err(|e| {
         TileError::Compression(format!(
@@ -279,20 +306,18 @@ fn decompress(bytes: &[u8]) -> Result<Vec<u8>, TileError> {
     let decoder = zstd::stream::read::Decoder::with_buffer(bytes)
         .map_err(invalid)?
         .single_frame();
-    let mut out = Vec::with_capacity(RAW_LEN);
+    let max = SIZES.iter().map(|&s| raw_len(s)).max().unwrap_or(0);
+    let mut out = Vec::new();
     decoder
-        .take(RAW_LEN as u64 + 1)
+        .take(max as u64 + 1)
         .read_to_end(&mut out)
         .map_err(invalid)?;
-    if out.len() != RAW_LEN {
+    if !SIZES.iter().any(|&s| raw_len(s) == out.len()) {
+        let lens: Vec<usize> = SIZES.iter().map(|&s| raw_len(s)).collect();
         return Err(TileError::Compression(format!(
-            "zstd frame decompresses to {}{} bytes, a tile is {RAW_LEN}",
-            if out.len() > RAW_LEN {
-                "more than "
-            } else {
-                ""
-            },
-            out.len().min(RAW_LEN)
+            "zstd frame decompresses to {}{} bytes, a tile is one of {lens:?}",
+            if out.len() > max { "more than " } else { "" },
+            out.len().min(max)
         )));
     }
     Ok(out)
@@ -303,7 +328,7 @@ mod tests {
     use super::*;
 
     fn ramp(key: TileKey) -> Tile {
-        let samples = (0..TILE_SAMPLES as i32)
+        let samples = (0..crate::grid::TILE_SAMPLES as i32)
             .map(|i| ((i * 37) % 20001 - 11000) as i16)
             .collect();
         Tile::new(key, samples).unwrap()
@@ -356,7 +381,7 @@ mod tests {
             Err(TileError::KeyMismatch { .. })
         ));
         let raw = t.raw_bytes();
-        assert_eq!(raw.len(), RAW_LEN);
+        assert_eq!(raw.len(), raw_len(TILE_SIZE));
         assert_eq!(&raw[0..8], b"3GTE\x01\x00\x02\x00");
         assert_eq!(&raw[8..16], &[5, 0, 0, 0, 7, 0, 0, 0]);
         assert_eq!(&raw[16..18], &(-11000i16).to_le_bytes());
@@ -388,7 +413,7 @@ mod tests {
         let z = zstd::bulk::compress(&raw, ZSTD_LEVEL).unwrap();
         assert_eq!(Tile::decode(&z), Err(TileError::ReservedNonzero(1)));
         let raw = t.raw_bytes();
-        let z = zstd::bulk::compress(&raw[..RAW_LEN - 2], ZSTD_LEVEL).unwrap();
+        let z = zstd::bulk::compress(&raw[..raw_len(TILE_SIZE) - 2], ZSTD_LEVEL).unwrap();
         assert!(matches!(Tile::decode(&z), Err(TileError::Compression(_))));
         assert_eq!(
             Tile::new(t.key(), vec![0; 3]),

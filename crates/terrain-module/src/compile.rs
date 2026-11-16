@@ -62,7 +62,7 @@ use gx_core::key::{CellGeometry, CellKey, ChunkKey};
 use gx_core::matter::{self, Compression, Sample, Samples, Section, State};
 use gx_core::registry::{self, Registry};
 use gx_core::units::{Attenuation, Density, Kelvin, Ratio};
-use terrain_tiles::{Tile, TileError};
+use terrain_tiles::{Presence, Tile, TileError};
 
 use crate::frame::{RESOLUTION, SUBSAMPLES};
 use crate::geodesy::{atan2, latitude_height, A, B, H_MAX, H_MIN, Q_SOLID, Q_VACUUM};
@@ -124,9 +124,14 @@ impl From<ValidationError> for CompileError {
 /// The source tile ids a key needs, ascending and unique: none for the
 /// registry, the plan's tiles for a cell.
 pub fn sources(key: &ChunkKey) -> Vec<u64> {
+    sources_with(key, plan::presence())
+}
+
+/// [`sources`] over a source set whose fine tiles are `presence`.
+pub fn sources_with(key: &ChunkKey, presence: &Presence) -> Vec<u64> {
     match key {
         ChunkKey::Registry => Vec::new(),
-        ChunkKey::Cell(cell) => plan::sources(cell),
+        ChunkKey::Cell(cell) => plan::sources_with(cell, presence),
     }
 }
 
@@ -144,9 +149,20 @@ pub fn decode_tiles<'a>(
 /// Compiles one key to its section bytes, validated with the library
 /// validator. `tiles` must hold the tiles [`sources`] lists for the key.
 pub fn compile(key: &ChunkKey, tiles: &BTreeMap<u64, Tile>) -> Result<Vec<u8>, CompileError> {
+    compile_with(key, tiles, plan::presence())
+}
+
+/// [`compile`] over a source set whose fine tiles are `presence`.
+pub fn compile_with(
+    key: &ChunkKey,
+    tiles: &BTreeMap<u64, Tile>,
+    presence: &Presence,
+) -> Result<Vec<u8>, CompileError> {
     let bytes = match key {
         ChunkKey::Registry => registry::encode(&Registry::empty()),
-        ChunkKey::Cell(cell) => matter::encode(&section(cell, tiles)?, Compression::Zstd),
+        ChunkKey::Cell(cell) => {
+            matter::encode(&section_with(cell, tiles, presence)?, Compression::Zstd)
+        }
     };
     gx_core::validate(&key.to_string(), &bytes)?;
     Ok(bytes)
@@ -154,12 +170,21 @@ pub fn compile(key: &ChunkKey, tiles: &BTreeMap<u64, Tile>) -> Result<Vec<u8>, C
 
 /// The section of one cell, before encoding. See the module documentation.
 pub fn section(key: &CellKey, tiles: &BTreeMap<u64, Tile>) -> Result<Section, CompileError> {
+    section_with(key, tiles, plan::presence())
+}
+
+/// [`section`] over a source set whose fine tiles are `presence`.
+pub fn section_with(
+    key: &CellKey,
+    tiles: &BTreeMap<u64, Tile>,
+    presence: &Presence,
+) -> Result<Section, CompileError> {
     let g = plan::geometry(key)?;
-    let samples = match plan::plan(key)? {
+    let samples = match plan::plan_with(key, presence)? {
         Plan::Empty => None,
         Plan::Interior => Some(sample_cell(&g, None)?),
         Plan::Surface { level, .. } => {
-            let mut surface = Surface::new(GRID, level, tiles);
+            let mut surface = Surface::new(GRID, level, tiles, presence);
             Some(sample_cell(&g, Some(&mut surface))?)
         }
     };

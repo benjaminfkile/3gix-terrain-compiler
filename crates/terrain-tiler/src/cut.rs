@@ -444,7 +444,7 @@ fn write_tile(out: &Path, band: &Band, col: u32) -> Result<(Entry, bool), CutErr
 }
 
 /// Writes `bytes` to `path` through a temporary file in the same directory.
-fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), CutError> {
+pub(crate) fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), CutError> {
     let io = |e| CutError::Io(path.to_path_buf(), e);
     if let Some(dir) = path.parent() {
         fs::create_dir_all(dir).map_err(io)?;

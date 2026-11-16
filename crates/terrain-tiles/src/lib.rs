@@ -12,7 +12,11 @@
 //!   where a geodetic latitude and longitude falls on a level.
 //! - [`tile`]: one tile's bytes (`3GTE`, version 1) and its id.
 //! - [`interp`]: nearest sample and bicubic (Catmull-Rom) interpolation
-//!   over a level, across tile edges, from tiles the caller supplies.
+//!   over a level, across tile edges, from tiles the caller supplies, and
+//!   the same with a fallback to coarser levels where a fine tile does not
+//!   exist.
+//! - [`presence`]: which fine tiles of a sparse pyramid (GLO-30, land
+//!   only) exist.
 //! - [`check`]: a fixed digest over encoding, decoding, and interpolation,
 //!   used to prove that native code and WebAssembly agree byte for byte.
 //!
@@ -29,8 +33,10 @@
 pub mod check;
 pub mod grid;
 pub mod interp;
+pub mod presence;
 pub mod tile;
 
 pub use grid::{Grid, Position};
-pub use interp::{bicubic, nearest, TileSource};
+pub use interp::{bicubic, bicubic_present, nearest, TileSource};
+pub use presence::Presence;
 pub use tile::{Tile, TileError, TileKey};

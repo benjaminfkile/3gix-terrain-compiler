@@ -49,11 +49,20 @@ use core::ops::RangeInclusive;
 
 use crate::tile::TileKey;
 
-/// Samples along each edge of a tile.
+/// Samples along each edge of a tile of a grid made with [`Grid::new`]
+/// (the GEBCO pyramid). [`Grid::GLO30`] uses [`GLO30_TILE_SIZE`].
 pub const TILE_SIZE: u32 = 240;
 
-/// Samples in one tile.
+/// Samples in one tile of [`TILE_SIZE`].
 pub const TILE_SAMPLES: usize = (TILE_SIZE * TILE_SIZE) as usize;
+
+/// Samples along each edge of a tile of [`Grid::GLO30`].
+pub const GLO30_TILE_SIZE: u32 = 960;
+
+/// The levels of [`Grid::GLO30`] that hold only tiles with land data
+/// (`0` to `FINE_LEVELS - 1`); every coarser level covers the globe. See
+/// [`crate::presence`].
+pub const FINE_LEVELS: u8 = 4;
 
 /// The largest number of rows a grid may have: tile rows and columns must
 /// fit the 24 bits a tile id gives them.
@@ -64,6 +73,7 @@ pub const MAX_ROWS: u32 = 1 << 24;
 pub struct Grid {
     rows: u32,
     cols: u32,
+    tile: u32,
     top: u8,
 }
 
@@ -92,19 +102,51 @@ impl Grid {
     /// `2 * rows`, `rows` is 1 to [`MAX_ROWS`], and `cols` is divisible by
     /// `2^(top - 1)` (module documentation, values).
     pub const fn new(rows: u32, cols: u32) -> Option<Grid> {
+        Grid::with_tile_size(rows, cols, TILE_SIZE)
+    }
+
+    /// The land elevation pyramid: Copernicus GLO-30 on land, GEBCO under
+    /// the oceans, at 15/16 arcsecond (about 29 m), 691200 rows by
+    /// 1382400 columns, tiles of [`GLO30_TILE_SIZE`], eleven levels (0 to
+    /// 10). Level 4 has GEBCO's 15 arcsecond spacing, sample for sample.
+    pub const GLO30: Grid = match Grid::with_tile_size(691_200, 1_382_400, GLO30_TILE_SIZE) {
+        Some(g) => g,
+        None => panic!("the dataset grid is valid"),
+    };
+
+    /// [`Grid::new`] with tiles of `tile` by `tile` samples (1 to 4096).
+    pub const fn with_tile_size(rows: u32, cols: u32, tile: u32) -> Option<Grid> {
+        if tile == 0 || tile > 4096 {
+            return None;
+        }
         if rows == 0 || rows > MAX_ROWS || cols as u64 != 2 * rows as u64 {
             return None;
         }
         // With cols = 2 rows, a level fits 2 by 1 tiles exactly when one
         // tile row covers all rows.
         let mut top: u8 = 0;
-        while (rows as u64) > (TILE_SIZE as u64) << top {
+        while (rows as u64) > (tile as u64) << top {
             top += 1;
         }
         if top > 0 && !cols.is_multiple_of(1u32 << (top - 1)) {
             return None;
         }
-        Some(Grid { rows, cols, top })
+        Some(Grid {
+            rows,
+            cols,
+            tile,
+            top,
+        })
+    }
+
+    /// Samples along each edge of a tile.
+    pub const fn tile_size(&self) -> u32 {
+        self.tile
+    }
+
+    /// Samples in one tile.
+    pub const fn tile_samples(&self) -> usize {
+        (self.tile as usize) * (self.tile as usize)
     }
 
     /// Data rows.
@@ -130,12 +172,12 @@ impl Grid {
 
     /// Rows of tiles on `level`.
     pub const fn tile_rows(&self, level: u8) -> u32 {
-        div_ceil(self.rows as u64, (TILE_SIZE as u64) << level) as u32
+        div_ceil(self.rows as u64, (self.tile as u64) << level) as u32
     }
 
     /// Columns of tiles on `level`.
     pub const fn tile_cols(&self, level: u8) -> u32 {
-        div_ceil(self.cols as u64, (TILE_SIZE as u64) << level) as u32
+        div_ceil(self.cols as u64, (self.tile as u64) << level) as u32
     }
 
     /// Tiles on `level`.
@@ -145,12 +187,12 @@ impl Grid {
 
     /// Lattice rows on `level`: tile rows times [`TILE_SIZE`].
     pub const fn lattice_rows(&self, level: u8) -> u32 {
-        self.tile_rows(level) * TILE_SIZE
+        self.tile_rows(level) * self.tile
     }
 
     /// Lattice columns on `level`: tile columns times [`TILE_SIZE`].
     pub const fn lattice_cols(&self, level: u8) -> u32 {
-        self.tile_cols(level) * TILE_SIZE
+        self.tile_cols(level) * self.tile
     }
 
     /// Rows of `level` that touch the globe: `ceil(rows / 2^level)`. The
@@ -234,10 +276,10 @@ impl Grid {
     pub fn locate(&self, level: u8, r: u32, c: u32) -> (TileKey, usize) {
         let key = TileKey {
             level,
-            row: r / TILE_SIZE,
-            col: c / TILE_SIZE,
+            row: r / self.tile,
+            col: c / self.tile,
         };
-        let index = (r % TILE_SIZE) as usize * TILE_SIZE as usize + (c % TILE_SIZE) as usize;
+        let index = (r % self.tile) as usize * self.tile as usize + (c % self.tile) as usize;
         (key, index)
     }
 
@@ -311,7 +353,7 @@ impl Grid {
         cols: RangeInclusive<i64>,
     ) -> Vec<u64> {
         let mut tile_rows: Vec<u32> = rows
-            .map(|r| self.lattice_row(level, r) / TILE_SIZE)
+            .map(|r| self.lattice_row(level, r) / self.tile)
             .collect();
         tile_rows.sort_unstable();
         tile_rows.dedup();
@@ -325,8 +367,8 @@ impl Grid {
         let mut tile_cols: Vec<u32> = cols
             .flat_map(|c| {
                 [
-                    self.lattice_col(level, c) / TILE_SIZE,
-                    self.lattice_col(level, c.rem_euclid(period)) / TILE_SIZE,
+                    self.lattice_col(level, c) / self.tile,
+                    self.lattice_col(level, c.rem_euclid(period)) / self.tile,
                 ]
             })
             .collect();

@@ -9,8 +9,8 @@
 
 use std::collections::BTreeMap;
 
-use terrain_tiles::interp::{catmull_rom, sample_at};
-use terrain_tiles::{Grid, Tile, TileError};
+use terrain_tiles::interp::{catmull_rom, sample_present};
+use terrain_tiles::{Grid, Presence, Tile, TileError};
 
 use crate::geodesy::{H_MAX, H_MIN};
 
@@ -19,17 +19,26 @@ pub struct Surface<'a> {
     grid: Grid,
     level: u8,
     tiles: &'a BTreeMap<u64, Tile>,
+    presence: &'a Presence,
     stencil_at: Option<(i64, i64)>,
     stencil: [[f64; 4]; 4],
 }
 
 impl<'a> Surface<'a> {
-    /// The surface of `level` of `grid` over `tiles`.
-    pub fn new(grid: Grid, level: u8, tiles: &'a BTreeMap<u64, Tile>) -> Surface<'a> {
+    /// The surface of `level` of `grid` over `tiles`, reading the next
+    /// coarser level where a fine tile does not exist (`presence`,
+    /// [`terrain_tiles::interp::sample_present`]).
+    pub fn new(
+        grid: Grid,
+        level: u8,
+        tiles: &'a BTreeMap<u64, Tile>,
+        presence: &'a Presence,
+    ) -> Surface<'a> {
         Surface {
             grid,
             level,
             tiles,
+            presence,
             stencil_at: None,
             stencil: [[0.0; 4]; 4],
         }
@@ -41,7 +50,8 @@ impl<'a> Surface<'a> {
     }
 
     /// The bicubic elevation at geodetic latitude `lat` and longitude
-    /// `lon` (radians), meters, bit for bit [`terrain_tiles::bicubic`].
+    /// `lon` (radians), meters, bit for bit
+    /// [`terrain_tiles::bicubic_present`].
     pub fn elevation(&mut self, lat: f64, lon: f64) -> Result<f64, TileError> {
         let p = self.grid.position(self.level, lat, lon);
         let (fy, fx) = (p.y.floor(), p.x.floor());
@@ -50,14 +60,14 @@ impl<'a> Surface<'a> {
         if self.stencil_at != Some((r0, c0)) {
             for (i, row) in self.stencil.iter_mut().enumerate() {
                 for (j, v) in row.iter_mut().enumerate() {
-                    let s = sample_at(
+                    *v = sample_present(
                         &self.grid,
                         self.tiles,
+                        self.presence,
                         self.level,
                         r0 - 1 + i as i64,
                         c0 - 1 + j as i64,
                     )?;
-                    *v = f64::from(s);
                 }
             }
             self.stencil_at = Some((r0, c0));
@@ -89,7 +99,8 @@ mod tests {
         let d = core::f64::consts::PI / 180.0;
         let ids = GRID.tiles_for_region(0, -0.3 * d, 0.3 * d, -0.3 * d, 0.3 * d);
         let tiles: BTreeMap<u64, Tile> = ids.iter().map(|&id| (id, fixture::tile(id))).collect();
-        let mut s = Surface::new(GRID, 0, &tiles);
+        let all = Presence::all();
+        let mut s = Surface::new(GRID, 0, &tiles, &all);
         for i in 0..2000 {
             let lat = (f64::from(i) * 0.000_29 - 0.25) * d;
             let lon = (f64::from(i % 97) * 0.0051 - 0.24) * d;

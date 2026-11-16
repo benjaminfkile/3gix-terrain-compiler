@@ -15,6 +15,7 @@
 use std::collections::BTreeMap;
 
 use crate::grid::Grid;
+use crate::presence::Presence;
 use crate::tile::{Tile, TileError};
 
 /// Where an interpolator gets tiles from.
@@ -96,6 +97,57 @@ pub fn bicubic<S: TileSource + ?Sized>(
         let mut v = [0.0f64; 4];
         for (j, value) in v.iter_mut().enumerate() {
             *value = f64::from(sample_at(grid, tiles, level, r, c0 - 1 + j as i64)?);
+        }
+        *row = catmull_rom(v, tx);
+    }
+    Ok(catmull_rom(rows, ty))
+}
+
+/// The elevation of lattice sample `(r, c)` on `level` like [`sample_at`],
+/// except where its tile does not exist (`presence`): there it is the
+/// [`bicubic_present`] elevation at the sample's center on the next
+/// coarser level. A fine level missing under the ocean thus reads as the
+/// coarser data interpolated, and a stencil across a coast mixes the two
+/// smoothly.
+pub fn sample_present<S: TileSource + ?Sized>(
+    grid: &Grid,
+    tiles: &S,
+    presence: &Presence,
+    level: u8,
+    r: i64,
+    c: i64,
+) -> Result<f64, TileError> {
+    let (lr, lc) = (grid.lattice_row(level, r), grid.lattice_col(level, c));
+    let (key, index) = grid.locate(level, lr, lc);
+    if presence.contains(key) || level >= grid.top_level() {
+        let id = key.id();
+        let tile = tiles.tile(id).ok_or(TileError::Missing(id))?;
+        return Ok(f64::from(tile.samples()[index]));
+    }
+    let (lat, lon) = grid.center(level, lr, lc);
+    bicubic_present(grid, tiles, presence, level + 1, lat, lon)
+}
+
+/// [`bicubic`] over the tiles that exist (`presence`), each sample read with
+/// [`sample_present`]. With [`Presence::all`] it is exactly [`bicubic`].
+pub fn bicubic_present<S: TileSource + ?Sized>(
+    grid: &Grid,
+    tiles: &S,
+    presence: &Presence,
+    level: u8,
+    lat: f64,
+    lon: f64,
+) -> Result<f64, TileError> {
+    let p = grid.position(level, lat, lon);
+    let (fy, fx) = (p.y.floor(), p.x.floor());
+    let (ty, tx) = (p.y - fy, p.x - fx);
+    let (r0, c0) = (fy as i64, fx as i64);
+    let mut rows = [0.0f64; 4];
+    for (i, row) in rows.iter_mut().enumerate() {
+        let r = r0 - 1 + i as i64;
+        let mut v = [0.0f64; 4];
+        for (j, value) in v.iter_mut().enumerate() {
+            *value = sample_present(grid, tiles, presence, level, r, c0 - 1 + j as i64)?;
         }
         *row = catmull_rom(v, tx);
     }

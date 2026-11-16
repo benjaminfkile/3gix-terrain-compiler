@@ -11,11 +11,13 @@
 //! - [`synth`]: a synthetic grid file in the same layout, for tests and
 //!   timing.
 //! - [`cut`]: the deterministic, resumable, streaming cutter.
+//! - [`glo30`]: the GLO-30 land pyramid on GEBCO, cut band by band.
 //! - [`upload`]: the uploader.
 
 #![warn(missing_docs)]
 
 pub mod cut;
+pub mod glo30;
 pub mod source;
 pub mod synth;
 pub mod upload;
