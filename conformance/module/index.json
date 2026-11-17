@@ -10,77 +10,77 @@
     "02-whole-d0": {
       "key": "4-0-0-0-0",
       "origin_utc_ms": 0,
-      "sha256": "0dcbee4a7c53d055c75c9d5c1c9f332ea077dfce27fee39a69647e782e088373",
+      "sha256": "dc0c00a87e7fc2e8417546c46cd7fc7d1b4c362b27bba6f8e42f22ff35b0c5e3",
       "sources": ["10/0/0", "10/0/1"],
       "why": "the whole frame at depth 0, both tiles of the top level"
     },
     "03-octant-d3": {
       "key": "4-3-4-4-4",
       "origin_utc_ms": 0,
-      "sha256": "53617031e0e0cd81a8dd4d2e044d4db213e9f1fbdf42754146ab742885712eb6",
+      "sha256": "f6ab33af59a51e320aac390eb50d755c1cf7c5e920fe007bf31657d7860f53d8",
       "sources": ["10/0/0", "10/0/1"],
       "why": "an octant from the center to the surface, depth 3"
     },
     "04-island-d6": {
       "key": "4-6-40-32-32",
       "origin_utc_ms": 0,
-      "sha256": "29619eb4a11f9ea308e63daccbdded179b17d5048c52502b494c62440613051b",
+      "sha256": "bc95d263d9416880fa7baba0dfca73925ef865a87694c93f1c0547e26b7ca1d7",
       "sources": ["9/0/1"],
       "why": "the surface where the frame's x axis leaves it, depth 6, level 9"
     },
     "05-shelf-d9": {
       "key": "4-9-320-255-256",
       "origin_utc_ms": 0,
-      "sha256": "afd1aa99dff7a6f7da0c0d3da404b7b65fcbe59a4fed6c93d4eefeff06b816d4",
+      "sha256": "1dd99f28968b210899bf0f6856a0b27e9a61defa9701e95487a331126f489457",
       "sources": ["6/5/11"],
       "why": "island and seafloor across the prime meridian, depth 9, level 6"
     },
     "06-interior-d8": {
       "key": "4-8-128-128-128",
       "origin_utc_ms": 0,
-      "sha256": "45fc47de659db1ef5e893f44315bd58be154b7edd43a688248633704c2af6dc7",
+      "sha256": "e287e93d68ccf62d207e35e1b16d3879dadb0875090058ed067859a77f1996ee",
       "sources": [],
       "why": "an interior cell at the center, the profile alone, no sources"
     },
     "07-coast-d11": {
       "key": "4-11-1280-1027-1025",
       "origin_utc_ms": 0,
-      "sha256": "c9e45bfcb373127b1162d0831e77f7f63e254ae53f83b87a5ba47cb8a8b7d5e8",
+      "sha256": "4ef1bb5da9cc8efbb79fc8c93a63efb75843eb27a5518ecaa272c72de3a23f59",
       "sources": ["4/22/45"],
       "why": "a coastline cell: land and seafloor albedo, depth 11, level 4"
     },
     "08-tile-edge-d14": {
       "key": "4-14-10242-8191-8209",
       "origin_utc_ms": 0,
-      "sha256": "4e045b2672b56ba9b2d73cdb26556dba3ca5a16470b71d07752b976a1e755c12",
+      "sha256": "f176ff60b478936a807dfa715061efa64139ccb48588e16c61495431053ac14c",
       "sources": ["4/22/44", "4/22/45"],
       "why": "a cell against the edge between two level 1 tile columns, depth 14"
     },
     "09-peak-d16": {
       "key": "4-16-40979-32775-32774",
       "origin_utc_ms": 0,
-      "sha256": "d05f17ed53531fdc54ee2d7c1ff7c475cb6c5e691aca5e5d4f903e02516d93fb",
+      "sha256": "2fcfc33ccb2fd829ab726053a4b866ae40ce2b3d66c9ef037d7e8cd5bc1d34af",
       "sources": ["4/22/45"],
       "why": "the cell holding the fixture summit at 8000 m, depth 16"
     },
     "10-trench-d16": {
       "key": "4-16-40947-33125-32768",
       "origin_utc_ms": 0,
-      "sha256": "b87bc89e9f6d5e3514c7419c8e61819d36690c4085c031f18a036ba8e983384c",
+      "sha256": "168982d1dfc8e34f521d1e571bc18ce645374e9a4ee88d3b7dfe4bd9238d4505",
       "sources": ["4/22/45"],
       "why": "the floor of the fixture trench at -10900 m, depth 16"
     },
     "11-surface-d21": {
       "key": "4-21-1311018-1047201-1049940",
       "origin_utc_ms": 0,
-      "sha256": "c1785c3512a57e389d767d20375641d12e64e1e0998614f53085b912ac0e692a",
+      "sha256": "bd0cca2b3c7e2d9fc443bb2dc76765ebd41ad43565774c9fd2580e65154afca0",
       "sources": ["4/22/44"],
       "why": "the island's surface at the deepest depth, samples 0.76 m apart"
     },
     "12-above-d12": {
       "key": "4-12-2565-2045-2050",
       "origin_utc_ms": 0,
-      "sha256": "680a7e695066a9ad253087c5517e212f056d9419aeea14ea95c7398b4cd9ee6a",
+      "sha256": "c2a8bf503f716866265382d001ce8e906ebb4c28992cba9d06991b669cb21494",
       "sources": [],
       "why": "an empty cell more than 9 km above the surface, no sources"
     }

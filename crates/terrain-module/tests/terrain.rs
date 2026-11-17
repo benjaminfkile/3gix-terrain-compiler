@@ -377,3 +377,78 @@ fn cells_just_west_of_the_antimeridian_list_the_tiles_they_read() {
         assert!(section(&key, &tiles).is_ok(), "{k}");
     }
 }
+
+/// The surface is the level set `occupancy = 0.5` (`matter-format.md`
+/// section 3.3), and the ramp puts it on the elevation surface between
+/// sample centers. Near latitude 0 and longitude 0 the frame's `x` axis is
+/// the vertical, so every line of sample centers along `x` is a vertical
+/// line. Through a cell on the summit's flank at three depths, wherever
+/// occupancy crosses 0.5 along such a line, linear between sample centers,
+/// the crossing lies within a tenth of a sample spacing of the point where
+/// the line meets the bicubic elevation surface the cell was built from.
+#[test]
+fn occupancy_one_half_lies_on_the_elevation_surface() {
+    use terrain_module::plan::GRID;
+    use terrain_module::surface::Surface;
+
+    let (sl, so) = fixture::summit();
+    let (lat, lon) = (sl + 0.015 * DEG, so - 0.01 * DEG);
+    let h = fixture::elevation(lat, lon);
+    let all = Presence::all();
+    let mut worst: f64 = 0.0;
+    for depth in [10u8, 14, 17] {
+        let key = cell_at(depth, frame_point(Geodetic { lat, lon, h })).unwrap();
+        let k = ChunkKey::Cell(key);
+        let tiles = fixture::tiles(&sources(&k));
+        let s = section(&key, &tiles).unwrap();
+        let level = match plan::plan_with(&key, &all) {
+            Ok(Plan::Surface { level, .. }) => level,
+            other => panic!("{other:?}"),
+        };
+        let mut surface = Surface::new(GRID, level, &tiles, &all);
+        let v = s.samples().unwrap();
+        let n = usize::from(s.resolution());
+        let e = sample_edge(&s);
+        let o = s.origin();
+        let mut crossings = 0;
+        let mut worst_here: f64 = 0.0;
+        for z in 0..n {
+            for y in 0..n {
+                let (yc, zc) = (o.y + e * (y as f64 + 0.5), o.z + e * (z as f64 + 0.5));
+                let occ: Vec<f64> = (0..n)
+                    .map(|x| v.occupancy(x + n * (y + n * z)).value())
+                    .collect();
+                for x in 0..n - 1 {
+                    let (a, b) = (occ[x], occ[x + 1]);
+                    if (a - 0.5) * (b - 0.5) > 0.0 || a == b {
+                        continue;
+                    }
+                    let x_half = o.x + e * (x as f64 + 0.5) + e * (a - 0.5) / (a - b);
+                    // Where the line meets the bicubic surface: the height
+                    // above it is 0.
+                    let mut xs = x_half;
+                    for _ in 0..50 {
+                        let g = geodetic(xs, yc, zc);
+                        xs -= g.h - surface.clamped_elevation(g.lat, g.lon).unwrap();
+                    }
+                    let g = geodetic(xs, yc, zc);
+                    let miss = g.h - surface.clamped_elevation(g.lat, g.lon).unwrap();
+                    assert!(miss.abs() < 1e-6, "depth {depth}: no solution {miss}");
+                    let offset = (x_half - xs).abs() / e;
+                    assert!(
+                        offset <= 0.1,
+                        "depth {depth} y {y} z {z}: {offset} spacings"
+                    );
+                    worst_here = worst_here.max(offset);
+                    crossings += 1;
+                }
+            }
+        }
+        // The surface crosses the cell (on the flank it may leave through
+        // the top or the bottom, so not every line meets it).
+        assert!(crossings >= n, "depth {depth}: {crossings} crossings");
+        eprintln!("depth {depth}: {crossings} crossings, worst offset {worst_here} spacings");
+        worst = worst.max(worst_here);
+    }
+    eprintln!("worst offset of the 0.5 crossing: {worst} sample spacings");
+}
