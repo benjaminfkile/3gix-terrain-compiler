@@ -39,8 +39,9 @@
 //! Density is the share of the sample below the elevation surface times the
 //! mean density the sample would have filled with rock (the interior density
 //! at its `SUBSAMPLES^3` points). The share is a linear ramp of the height of
-//! the sample's center below the surface, as wide as the sample reaches
-//! along the vertical (the ellipsoid normal's spread over the cell axes),
+//! the sample's center below the surface, twice as wide as the sample
+//! reaches along the vertical (the ellipsoid normal's spread over the cell
+//! axes), so both ends of any grid edge the surface crosses lie on it,
 //! clamped to 0 and 1: a surface crossing a row of samples gives densities
 //! linear in the distance to it, so a surface drawn linear between sample
 //! centers follows it without the ripple a count of points inside leaves at
@@ -287,8 +288,9 @@ fn sample_cell(g: &CellGeometry, mut surface: Option<&mut Surface>) -> Result<Sa
                     }
                 }
                 // The share of the sample below the surface: a linear ramp
-                // of its center's height below the elevation surface, as
-                // wide as the sample reaches along the vertical. A surface
+                // of its center's height below the elevation surface, twice
+                // as wide as the sample reaches along the vertical, so both
+                // ends of any grid edge the surface crosses lie on it. A surface
                 // crossing a row of samples then gives densities linear in
                 // the distance to it, so the drawn surface (linear between
                 // sample centers) follows it without the ripple a count of
@@ -303,7 +305,7 @@ fn sample_cell(g: &CellGeometry, mut surface: Option<&mut Surface>) -> Result<Sa
                         // The ellipsoid normal's spread over the axes.
                         let (ux, uy, uz) = (px / (A * A), py / (A * A), pz / (B * B));
                         let ul = (ux * ux + uy * uy + uz * uz).sqrt();
-                        let width = e * (ux.abs() + uy.abs() + uz.abs()) / ul;
+                        let width = 2.0 * e * (ux.abs() + uy.abs() + uz.abs()) / ul;
                         if h > H_MAX + width {
                             0.0
                         } else if h < H_MIN - width {
