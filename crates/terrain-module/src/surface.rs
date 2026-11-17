@@ -13,6 +13,11 @@
 //! a tree of `16^k` reads `k` levels deep (65536 per sample for open ocean
 //! read at level 0), so the surface keeps every such sample it computes:
 //! the same values, each lattice point computed once per cell.
+//!
+//! The points of one sample fall in a few neighboring stencils and the
+//! sampler visits them in turn, so the surface also keeps every stencil it
+//! has read, by its lattice cell: a stencil is read from the tiles once
+//! per cell, not each time the points move back into it.
 
 use std::collections::{BTreeMap, HashMap};
 
@@ -31,6 +36,9 @@ pub struct Surface<'a> {
     presence: &'a Presence,
     stencil_at: Option<(i64, i64)>,
     stencil: [[f64; 4]; 4],
+    /// Every stencil read so far, by the lattice row and column of its
+    /// second sample.
+    stencils: HashMap<(i64, i64), [[f64; 4]; 4]>,
     /// Samples of missing tiles already computed, by level and lattice
     /// row and column.
     fallback: HashMap<(u8, u32, u32), f64>,
@@ -53,6 +61,7 @@ impl<'a> Surface<'a> {
             presence,
             stencil_at: None,
             stencil: [[0.0; 4]; 4],
+            stencils: HashMap::new(),
             fallback: HashMap::new(),
         }
     }
@@ -71,13 +80,19 @@ impl<'a> Surface<'a> {
         let (ty, tx) = (p.y - fy, p.x - fx);
         let (r0, c0) = (fy as i64, fx as i64);
         if self.stencil_at != Some((r0, c0)) {
-            let mut stencil = [[0.0f64; 4]; 4];
-            for (i, row) in stencil.iter_mut().enumerate() {
-                for (j, v) in row.iter_mut().enumerate() {
-                    *v = self.sample(self.level, r0 - 1 + i as i64, c0 - 1 + j as i64)?;
+            self.stencil = match self.stencils.get(&(r0, c0)) {
+                Some(&stencil) => stencil,
+                None => {
+                    let mut stencil = [[0.0f64; 4]; 4];
+                    for (i, row) in stencil.iter_mut().enumerate() {
+                        for (j, v) in row.iter_mut().enumerate() {
+                            *v = self.sample(self.level, r0 - 1 + i as i64, c0 - 1 + j as i64)?;
+                        }
+                    }
+                    self.stencils.insert((r0, c0), stencil);
+                    stencil
                 }
-            }
-            self.stencil = stencil;
+            };
             self.stencil_at = Some((r0, c0));
         }
         let mut rows = [0.0f64; 4];

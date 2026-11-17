@@ -22,7 +22,8 @@ Compilers are allowed to know what things are. This one knows it builds a planet
 One request in (`client-compute.md` section 4), one section out. The origin and the span are ignored.
 
 - **`registry`**: the empty registry. The system module declares frame 4; this module only fills it.
-- **A cell of frame 4**, depth 0 to 21, resolution 32 at every depth. Each sample averages 4 x 4 x 4 stratified points, exactly as the system module samples its balls. A point is solid when its height above the ellipsoid is at or below the elevation surface there, vacuum above. Density is the share of the sample below the surface times the mean density of rock at its 64 points; the share is a linear ramp of the height of the sample's center below the elevation surface, twice as wide as the sample reaches along the vertical, so a surface drawn between sample centers follows the data without a ripple at every sample. Temperature and albedo are density-weighted means over the points inside the surface. Material: state solid, albedo 0.3 / 0.28 / 0.25 at or above the ellipsoid and 0.2 / 0.2 / 0.22 below it, roughness 0.9, attenuation 0 (opaque).
+- **A cell of frame 4**, depth 0 to 21, resolution 32 at every depth, in matter format 3. Each sample averages 4 x 4 x 4 stratified points, exactly as the system module samples its balls. A point is solid when its height above the ellipsoid is at or below the elevation surface there, vacuum above.
+- **Occupancy** (`matter-format.md` section 3.3) is the share of the sample below the elevation surface: a linear ramp of the height of the sample's center below the bicubic elevation surface, twice as wide as the sample reaches along the vertical, clamped to 0 and 1. Interior samples have occupancy 1. Both samples next to the surface lie on the ramp, so occupancy is linear in the distance to the surface there and its 0.5 level, which is where the renderer draws the surface, lies on the elevation surface between sample centers: `tests/terrain.rs` checks that along vertical lines through cells at depths 10, 14, and 17 the 0.5 crossing lies within a tenth of a sample spacing of the bicubic elevation (the worst is under 1e-6 spacings, the rounding of the stored `f32`). Density is the occupancy times the mean density of rock at the sample's 64 points. Temperature and albedo are density-weighted means over the points counted as rock: in a sample with occupancy strictly between 0 and 1, the points inside the surface; in a sample with occupancy 1, all of them. Material: state solid, albedo 0.3 / 0.28 / 0.25 at or above the ellipsoid and 0.2 / 0.2 / 0.22 below it, roughness 0.9, attenuation 0 (opaque).
 - **Geodesy** (`geodesy.rs`). Body z is the pole and body x points at the prime meridian, as the system module's registry orientation says. Latitude, longitude, and height come from Bowring's method with three iterations and a written-out inverse tangent (`gx_core::detmath` has none), from `+`, `-`, `*`, `/`, and `sqrt` only.
 - **The surface** (`plan.rs`, `surface.rs`). Bicubic (Catmull-Rom) interpolation of one pyramid level, the coarsest whose equatorial spacing is no larger than the cell's sample spacing: level 10 for depths 0 to 5, then one level finer per depth, level 0 from depth 15. Where a fine tile does not exist (open ocean, see Tile format), the stencil reads the next coarser level that has one, down to level 4, which covers the globe. Below the data's spacing (about 29 m on land, about 463 m under the oceans) the surface is that smooth interpolation; nothing is invented. Elevations are used as heights above the ellipsoid; GLO-30 heights are above the EGM2008 geoid and GEBCO's above mean sea level, and no geoid correction is applied (geoid and ellipsoid differ by up to about 100 m).
 - **The interior** (`interior.rs`). Density: the PREM piecewise polynomials (Dziewonski and Anderson 1981), evaluated at the point's ellipsoidal radius scaled to the model's 6371 km, with the model's ocean layer replaced by its upper crust. Temperature: 288 K at the surface, along a geotherm through 1600 K at 100 km, 1830 K at 410 km, 1960 K at 660 km, 2600 K at 2700 km, 4000 K at the core boundary (2891 km), and 6230 K at the inner core boundary, held below; the sources are in the module docs.
@@ -126,9 +127,10 @@ cargo run --release -p terrain-module -- describe 4-16-40979-32775-32774 --fixtu
 cargo run --release -p terrain-module -- describe KEY --tiles out/tiles
 cargo run --release -p terrain-module -- compile KEY --tiles out/tiles --out cell.bin
 cargo run --release -p terrain-module -- cell LAT_DEG LON_DEG HEIGHT_M DEPTH
+cargo run --release -p terrain-module -- bench 21 KEY... --fixture
 ```
 
-`--tiles` reads the tiles the tiler wrote; `--fixture` uses the synthetic fixture world. `cell` prints the key of the cell holding a place.
+`--tiles` reads the tiles the tiler wrote; `--fixture` uses the synthetic fixture world. `cell` prints the key of the cell holding a place. `bench` makes or reads the tiles once, then times what `gx_compile` does (decode the tiles, compile, encode, validate) the given number of times per key and prints the median, minimum, and maximum.
 
 ## Conformance
 
@@ -138,7 +140,7 @@ cargo run --release -p terrain-module -- cell LAT_DEG LON_DEG HEIGHT_M DEPTH
 cargo run --release -p terrain-module -- conformance conformance/module
 ```
 
-and review the diff. A change of any hash is a new module hash, so the layer must be published again. Regenerating takes about 40 minutes and `tests/conformance.rs` about 80 on an Apple M4: every fixture tile is 960 x 960 samples of the synthetic world.
+and review the diff. A change of any hash is a new module hash, so the layer must be published again. On the build container (10 cores, aarch64) regenerating takes 0.3 s (`time cargo run --release -p terrain-module -- conformance conformance/module`) and `cargo test --release -p terrain-module --test conformance` 0.4 s; the vectors carry 14 fixture tiles in all.
 
 ## Timing
 
@@ -146,10 +148,35 @@ The GLO-30 pyramid, cut on an Apple M4 (10 cores, 16 GB) with the raw tiles down
 
 The GEBCO only pyramid, measured on the build container (10 cores, aarch64) with a synthetic grid of 8640 x 17280 samples (149 million, 1/25 of the full grid) written by `terrain-tiler synth`: the cut took 2.3 s and wrote 3470 tiles, 201 MB in all, about 58 KB per tile. Scaled to the full grid's 3.73 billion samples and 86459 tiles, that is about 1 minute of cutting and about 5 GB of tiles. HDF5 decompression of the real file may add some time, because the file is larger per sample than the synthetic one. Real relief compresses differently from the synthetic relief, so the true size could be anywhere from about half of that estimate up to the uncompressed bound of 10 GB.
 
+### The module
+
+One surface section, native release build, on the build container (10 cores, aarch64), fixture tiles and the module's own presence map, measured with
+
+```sh
+cargo run --release -p terrain-module -- bench 21 KEY... --fixture
+```
+
+over five surface cells per depth: the island plateau (0.3, -0.3 degrees), the summit (0.0479, 0.0521), a flat cell with land tiles (45.5, 7.3), the ramp across longitude 0 (0.5, 0.01), and open ocean (-20, -140), each the cell holding the fixture surface there (`terrain-module cell LAT LON HEIGHT DEPTH`). Each key ran 21 times; the table gives the median over the five keys of each key's median.
+
+| Depth | Before (format 2) | After (format 3) | Faster |
+|---|---|---|---|
+| 10 | 56.4 ms | 12.4 ms | 4.5 x |
+| 14 | 191.8 ms | 17.3 ms | 11.1 x |
+| 17 | 122.8 ms | 13.5 ms | 9.1 x |
+
+Every key is at least 4.5 times faster (from 4.5 times for the ramp at depth 10 to 17.5 times for open ocean at depth 17); the slowest after is 26.0 ms (depth 14, open ocean, 8 tiles, 411.5 ms before), inside the rendering contract's 50 ms (`rendering.md` section 5.2). Where the time went before, and what changed:
+
+- Every sample visited its 64 points with the geodetic conversion and a bicubic read each, though only the samples on the ramp (about one in ten) need them. Now each sample's occupancy comes first, from its center. Occupancy 0 is vacuum without visiting its points; occupancy 1 is all rock with no elevation read, and its points need their height (for the albedo) only where the sample may reach the ellipsoid.
+- Within a sample, points move between a few neighboring bicubic stencils, and the surface kept only the last one, so it read 16 lattice samples again at every move. It now keeps every stencil it reads, so each is read once per cell.
+- Each point's interior density was computed twice, and the layer search started at the center of the body; it is now computed once per point and searched from the top.
+- Of what is left, decoding the tiles takes 0.3 to 3.4 ms, encoding the section 2 to 3.4 ms, and validating it 0.4 ms.
+
+The section bytes are the same as a plain format 3 port of the old sampler (occupancy added, nothing else changed) for all 25 keys above and all 12 conformance vectors. They differ only in samples with occupancy 1 on slopes steep enough that some of their points lie above the bicubic surface while the center lies more than half the ramp below it, which happens on the fixture coast (at most 74 samples of a cell at depths 11 to 15). Those samples now count all their points as rock for temperature and albedo, as their occupancy and density already did; temperature moves by at most 0.26 K and albedo by at most 0.0004, and density and occupancy do not change.
+
 ## Checks
 
 ```sh
 sh scripts/ci.sh
 ```
 
-The script runs fmt, clippy with warnings as errors, the zstd pin check, the WebAssembly builds of the tile crate and the module, the tile determinism check under Node, the core module determinism harness over `conformance/module` (native host and Node), the tests, and a dash check. The harness comes from the core checkout cargo fetched for `gx-core`, or from `GX_CORE_DIR` when set. Node must be on the path. The tests write their own synthetic grid files in the dataset's HDF5 layout. They compare every tile with an independent in-memory pyramid, pin golden hashes, and cover resuming, both row orders, the file checks, and upload against a stand-in hub. The module's tests cover the summit (rock to the fixture elevation within one sample spacing, vacuum above), the join of two cells across a tile edge, the mass at depth 3 against the registry mass, compiling twice, the registry and other frames, cells beyond the elevation shell, and that the listed tiles cover every read near the poles, the antimeridian, and tile corners.
+The script runs fmt, clippy with warnings as errors, the zstd pin check, the WebAssembly builds of the tile crate and the module, the tile determinism check under Node, the core module determinism harness over `conformance/module` (native host and Node), the tests, and a dash check. The harness comes from the core checkout cargo fetched for `gx-core`, or from `GX_CORE_DIR` when set. Node must be on the path. The tests write their own synthetic grid files in the dataset's HDF5 layout. They compare every tile with an independent in-memory pyramid, pin golden hashes, and cover resuming, both row orders, the file checks, and upload against a stand-in hub. The module's tests cover the summit (rock to the fixture elevation within one sample spacing, vacuum above), the 0.5 occupancy crossing on the bicubic elevation surface at depths 10, 14, and 17, the join of two cells across a tile edge, the mass at depth 3 against the registry mass, compiling twice, the registry and other frames, cells beyond the elevation shell, and that the listed tiles cover every read near the poles, the antimeridian, and tile corners.

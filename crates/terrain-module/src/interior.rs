@@ -107,13 +107,20 @@ pub const GEOTHERM: [(f64, f64); 7] = [
 ];
 
 /// Density at model radius `r` (meters), kilograms per cubic meter.
+///
+/// The layer is found from the top, where the module evaluates almost
+/// every point, and a layer of constant density skips its polynomial: the
+/// same values as evaluating it, since `x * 0` is 0 for every finite `x`.
 pub fn density(r: f64) -> f64 {
-    let x = r / SURFACE_RADIUS;
-    let mut i = 0;
-    while r >= LAYERS[i].top {
-        i += 1;
+    let mut i = LAYERS.len() - 1;
+    while i > 0 && r < LAYERS[i - 1].top {
+        i -= 1;
     }
     let [a0, a1, a2, a3] = LAYERS[i].density;
+    if a1 == 0.0 && a2 == 0.0 && a3 == 0.0 {
+        return 1000.0 * a0;
+    }
+    let x = r / SURFACE_RADIUS;
     1000.0 * (a0 + x * (a1 + x * (a2 + x * a3)))
 }
 
@@ -159,6 +166,31 @@ mod tests {
         assert_eq!(density(6_350_000.0), 2900.0);
         assert_eq!(density(6_370_000.0), 2600.0);
         assert_eq!(density(6_380_000.0), 2600.0);
+    }
+
+    /// The layer search from the top and the constant layers' shortcut give
+    /// the bits of the plain evaluation: the first layer whose top is above
+    /// `r`, its polynomial in `r / SURFACE_RADIUS`.
+    #[test]
+    fn density_is_the_plain_evaluation() {
+        let plain = |r: f64| {
+            let x = r / SURFACE_RADIUS;
+            let mut i = 0;
+            while r >= LAYERS[i].top {
+                i += 1;
+            }
+            let [a0, a1, a2, a3] = LAYERS[i].density;
+            1000.0 * (a0 + x * (a1 + x * (a2 + x * a3)))
+        };
+        for i in 0..=800_000 {
+            let r = f64::from(i) * 9.0 + 0.37;
+            assert_eq!(density(r).to_bits(), plain(r).to_bits(), "{r}");
+        }
+        for l in LAYERS.iter().filter(|l| l.top.is_finite()) {
+            for r in [l.top, l.top.next_down(), l.top.next_up()] {
+                assert_eq!(density(r).to_bits(), plain(r).to_bits(), "{r}");
+            }
+        }
     }
 
     #[test]

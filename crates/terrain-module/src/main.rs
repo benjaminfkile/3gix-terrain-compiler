@@ -20,9 +20,14 @@ const USAGE: &str = "usage:
   terrain-module describe KEY (--fixture | --tiles DIR)
   terrain-module cell LAT_DEG LON_DEG HEIGHT_M DEPTH
   terrain-module conformance DIR
+  terrain-module bench RUNS KEY... (--fixture | --tiles DIR)
 
 --tiles DIR reads DIR/{level}/{row}/{col}.3gte, the layout terrain-tiler cut
-writes under out/tiles. --fixture uses the synthetic fixture tiles.";
+writes under out/tiles. --fixture uses the synthetic fixture tiles.
+
+bench times what gx_compile does for each key (decode the tile bytes,
+compile, encode, validate), RUNS times, and prints the median, minimum, and
+maximum in milliseconds. The tiles are read or made once, before timing.";
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -80,12 +85,57 @@ fn run(args: &[String]) -> Result<(), String> {
             println!("{}", ChunkKey::Cell(key));
             Ok(())
         }
+        "bench" => bench(&args[1..]),
         "conformance" => {
             let dir = PathBuf::from(args.get(1).ok_or(USAGE)?);
             conformance::write(&dir).map_err(|e| e.to_string())
         }
         _ => Err(USAGE.to_string()),
     }
+}
+
+/// `bench RUNS KEY... (--fixture | --tiles DIR)`: see [`USAGE`].
+fn bench(args: &[String]) -> Result<(), String> {
+    let runs: usize = args
+        .first()
+        .ok_or(USAGE)?
+        .parse()
+        .map_err(|e| format!("runs: {e}"))?;
+    let opts = args
+        .iter()
+        .position(|a| a.starts_with("--"))
+        .unwrap_or(args.len());
+    let mut medians = Vec::new();
+    for k in &args[1..opts] {
+        let key = parse_key(Some(k))?;
+        let tiles = load_tiles(&key, &args[opts..])?;
+        let encoded: Vec<(u64, Vec<u8>)> = tiles.iter().map(|(&id, t)| (id, t.encode())).collect();
+        let mut times = Vec::with_capacity(runs);
+        let mut out = Vec::new();
+        for _ in 0..runs.max(1) {
+            let start = std::time::Instant::now();
+            let decoded = compile::decode_tiles(encoded.iter().map(|(id, b)| (*id, b.as_slice())))
+                .map_err(|e| e.to_string())?;
+            out = compile::compile(&key, &decoded).map_err(|e| e.to_string())?;
+            times.push(start.elapsed().as_secs_f64() * 1e3);
+        }
+        times.sort_by(f64::total_cmp);
+        let median = times[times.len() / 2];
+        medians.push(median);
+        println!(
+            "{key} tiles {} bytes {} sha256 {} median {median:.2} ms min {:.2} max {:.2}",
+            encoded.len(),
+            out.len(),
+            &to_hex(&sha256(&out))[..16],
+            times[0],
+            times[times.len() - 1]
+        );
+    }
+    medians.sort_by(f64::total_cmp);
+    if let Some(m) = medians.get(medians.len() / 2) {
+        println!("median of the keys' medians {m:.2} ms");
+    }
+    Ok(())
 }
 
 fn parse_key(s: Option<&String>) -> Result<ChunkKey, String> {
