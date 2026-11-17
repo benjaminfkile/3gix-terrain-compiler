@@ -36,8 +36,15 @@
 //!
 //! # A sample
 //!
-//! Density is the sum of the solid points' densities divided by
-//! `SUBSAMPLES^3`: the solid fraction times the local density. Temperature
+//! Density is the share of the sample below the elevation surface times the
+//! mean density the sample would have filled with rock (the interior density
+//! at its `SUBSAMPLES^3` points). The share is a linear ramp of the height of
+//! the sample's center below the surface, as wide as the sample reaches
+//! along the vertical (the ellipsoid normal's spread over the cell axes),
+//! clamped to 0 and 1: a surface crossing a row of samples gives densities
+//! linear in the distance to it, so a surface drawn linear between sample
+//! centers follows it without the ripple a count of points inside leaves at
+//! every sample. Cells with no surface listed are full. Temperature
 //! and albedo are density-weighted means over the solid points. The
 //! radiating temperature (`matter-format.md` section 3.3) is the
 //! temperature at the model radius of the sub-cube's farthest corner:
@@ -238,10 +245,13 @@ fn sample_cell(g: &CellGeometry, mut surface: Option<&mut Surface>) -> Result<Sa
             for x in 0..n {
                 let (mut rho, mut rho_t) = (0.0f64, 0.0f64);
                 let mut rho_a = [0.0f64; 3];
+                // The density the sample would have filled with rock.
+                let mut rho_full = 0.0f64;
                 for k in z * s..(z + 1) * s {
                     for j in y * s..(y + 1) * s {
                         for i in x * s..(x + 1) * s {
                             let q2v = qx[i] + qy[j] + qz[k];
+                            rho_full += interior::density(SURFACE_RADIUS * q2v.sqrt());
                             let point = match surface.as_deref_mut() {
                                 None => Point::Solid { land: false },
                                 Some(_) if q2v < q_solid2 => Point::Solid { land: false },
@@ -276,12 +286,51 @@ fn sample_cell(g: &CellGeometry, mut surface: Option<&mut Surface>) -> Result<Sa
                         }
                     }
                 }
-                out.push(if rho > 0.0 {
+                // The share of the sample below the surface: a linear ramp
+                // of its center's height below the elevation surface, as
+                // wide as the sample reaches along the vertical. A surface
+                // crossing a row of samples then gives densities linear in
+                // the distance to it, so the drawn surface (linear between
+                // sample centers) follows it without the ripple a count of
+                // points inside the surface leaves at every sample.
+                let e = g.edge.value() / n as f64;
+                let fill = match surface.as_deref_mut() {
+                    None => 1.0,
+                    Some(sf) => {
+                        let c = |o: f64, i: usize| o + e * (i as f64 + 0.5);
+                        let (px, py, pz) = (c(g.origin.x, x), c(g.origin.y, y), c(g.origin.z, z));
+                        let (lat, h) = latitude_height((px * px + py * py).sqrt(), pz);
+                        // The ellipsoid normal's spread over the axes.
+                        let (ux, uy, uz) = (px / (A * A), py / (A * A), pz / (B * B));
+                        let ul = (ux * ux + uy * uy + uz * uz).sqrt();
+                        let width = e * (ux.abs() + uy.abs() + uz.abs()) / ul;
+                        if h > H_MAX + width {
+                            0.0
+                        } else if h < H_MIN - width {
+                            1.0
+                        } else {
+                            let elev = sf.clamped_elevation(lat, atan2(py, px))?;
+                            (0.5 + (elev - h) / width).clamp(0.0, 1.0)
+                        }
+                    }
+                };
+                if fill > 0.0 && rho == 0.0 {
+                    // The center is within the ramp but no point counted:
+                    // take the point values at the center.
+                    let c = |o: f64, i: usize| o + e * (i as f64 + 0.5);
+                    let (px, py, pz) = (c(g.origin.x, x), c(g.origin.y, y), c(g.origin.z, z));
+                    let q = (px / A) * (px / A) + (py / A) * (py / A) + (pz / B) * (pz / B);
+                    let r = SURFACE_RADIUS * q.sqrt();
+                    let d = interior::density(r);
+                    rho = d;
+                    rho_t = d * interior::temperature(r);
+                    rho_a = LAND_ALBEDO.map(|a| d * a);
+                }
+                out.push(if fill > 0.0 && rho > 0.0 {
                     // Opaque matter radiates from its outer side: the
                     // temperature at the sub-cube's farthest model radius
                     // (the surface value wherever the sub-cube reaches
                     // above the ground).
-                    let e = g.edge.value() / n as f64;
                     let far = |origin: f64, i: usize, axis: f64| -> f64 {
                         let lo = (origin + e * i as f64) / axis;
                         let hi = (origin + e * (i + 1) as f64) / axis;
@@ -291,7 +340,7 @@ fn sample_cell(g: &CellGeometry, mut surface: Option<&mut Surface>) -> Result<Sa
                         far(g.origin.x, x, A) + far(g.origin.y, y, A) + far(g.origin.z, z, B);
                     let r_top = SURFACE_RADIUS * q_far.sqrt();
                     Sample {
-                        density: Density::new(rho / total),
+                        density: Density::new(fill * rho_full / total),
                         state: State::Solid,
                         temperature: Kelvin::new(rho_t / rho),
                         radiating_temperature: Kelvin::new(interior::temperature(r_top)),
