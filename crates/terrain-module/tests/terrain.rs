@@ -34,7 +34,7 @@ const FRAME_MASS: f64 = 5.972168399787584e24;
 fn cell(key: &str) -> CellKey {
     match key.parse::<ChunkKey>().unwrap() {
         ChunkKey::Cell(c) => c,
-        ChunkKey::Registry => panic!("a cell key"),
+        ChunkKey::Registry | ChunkKey::Surface(_) => panic!("a cell key"),
     }
 }
 

@@ -29,7 +29,7 @@ fn check(key: CellKey) {
 fn a_cell_near_the_pole_across_a_level_4_tile_edge() {
     match "4-17-65414-65288-81877".parse::<ChunkKey>().unwrap() {
         ChunkKey::Cell(c) => check(c),
-        ChunkKey::Registry => unreachable!(),
+        ChunkKey::Registry | ChunkKey::Surface(_) => unreachable!(),
     }
 }
 

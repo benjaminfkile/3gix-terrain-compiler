@@ -42,6 +42,7 @@ pub mod geodesy;
 pub mod interior;
 pub mod plan;
 pub mod surface;
+pub mod surface_tile;
 
 use gx_module_guest::{gx_module, Module, Request, Tiles};
 
