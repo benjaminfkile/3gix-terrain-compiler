@@ -66,14 +66,19 @@ fn holds_pole(key: &SurfaceKey) -> bool {
     covers(key.x) && covers(key.y)
 }
 
-/// The latitude and longitude box of the tile's vertices, border included
-/// (radians, longitudes unwrapped, a full turn when the tile holds a pole).
-fn bounds(key: &SurfaceKey) -> (f64, f64, f64, f64) {
-    let last = TILE_QUADS as i64 + 1;
-    let (lat0, lon0) = lat_lon(key, -1, -1);
+/// The latitude and longitude box of the tile's vertices and its parent
+/// heights' vertices, borders included
+/// (radians, longitudes unwrapped). A tile within `pole_margin` radians of
+/// a pole reaches it and spans every longitude: the bicubic stencil there
+/// reads rows across the pole, at other longitudes.
+fn bounds(key: &SurfaceKey, pole_margin: f64) -> (f64, f64, f64, f64) {
+    // The parent heights' border reaches one parent vertex (two of the
+    // tile's) past the tile on every side.
+    let last = TILE_QUADS as i64 + 2;
+    let (lat0, lon0) = lat_lon(key, -2, -2);
     let (mut lat_lo, mut lat_hi, mut lon_lo, mut lon_hi) = (lat0, lat0, lon0, lon0);
-    for j in -1..=last {
-        for i in -1..=last {
+    for j in -2..=last {
+        for i in -2..=last {
             let (lat, mut lon) = lat_lon(key, i, j);
             if lon - lon0 > PI {
                 lon -= 2.0 * PI;
@@ -86,11 +91,20 @@ fn bounds(key: &SurfaceKey) -> (f64, f64, f64, f64) {
             lon_hi = lon_hi.max(lon);
         }
     }
-    if holds_pole(key) {
-        let up = key.face == 4;
+    if holds_pole(key) || lat_hi + pole_margin >= FRAC_PI_2 || lat_lo - pole_margin <= -FRAC_PI_2 {
+        let north = holds_pole(key) && key.face == 4 || lat_hi + pole_margin >= FRAC_PI_2;
+        let south = holds_pole(key) && key.face == 5 || lat_lo - pole_margin <= -FRAC_PI_2;
         return (
-            if up { lat_lo } else { -FRAC_PI_2 },
-            if up { FRAC_PI_2 } else { lat_hi },
+            if south {
+                -FRAC_PI_2
+            } else {
+                lat_lo - ANGLE_MARGIN
+            },
+            if north {
+                FRAC_PI_2
+            } else {
+                lat_hi + ANGLE_MARGIN
+            },
             -PI - 1.0,
             PI + 1.0,
         );
@@ -110,7 +124,12 @@ pub fn sources_with(key: &SurfaceKey, presence: &Presence) -> Vec<u64> {
     if key.frame_id != FRAME_ID || key.level > MAX_LEVEL {
         return Vec::new();
     }
-    let (la0, la1, lo0, lo1) = bounds(key);
+    let coarsest = level_for_tile(key.parent().map_or(key.level, |p| p.level));
+    // Four samples of the coarsest level read, and of every coarser level
+    // a fallback may read (missing fine tiles fall back level by level up
+    // to the top level).
+    let pole_margin = 4.0 * GRID.spacing(GRID.top_level().max(coarsest));
+    let (la0, la1, lo0, lo1) = bounds(key, pole_margin);
     let mut ids = presence.tiles_for_region(&GRID, level_for_tile(key.level), la0, la1, lo0, lo1);
     if let Some(p) = key.parent() {
         ids.extend(presence.tiles_for_region(&GRID, level_for_tile(p.level), la0, la1, lo0, lo1));
