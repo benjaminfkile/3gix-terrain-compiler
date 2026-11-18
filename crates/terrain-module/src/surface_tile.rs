@@ -23,7 +23,7 @@ use terrain_tiles::{Presence, Tile, TileError};
 
 use crate::compile::{LAND_ALBEDO, ROUGHNESS, SEAFLOOR_ALBEDO};
 use crate::frame::FRAME_ID;
-use crate::geodesy::{atan2, A, B};
+use crate::geodesy::{atan2, A, B, H_MIN};
 use crate::plan::{ANGLE_MARGIN, GRID};
 use crate::surface::Surface;
 
@@ -196,6 +196,9 @@ pub fn tile_with(
         key: *key,
         radius_equatorial: A,
         radius_polar: B,
+        // Every height is clamped to [H_MIN, H_MAX]
+        // (`Surface::clamped_elevation`), at every level.
+        height_floor: H_MIN,
         heights,
         parent_heights,
         albedo,
@@ -240,6 +243,20 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn tiles_declare_the_clamp_as_their_floor() {
+        let all = Presence::all();
+        let key = SurfaceKey::new(FRAME_ID, 1, 3, 2, 5).unwrap();
+        let tiles: BTreeMap<u64, Tile> = sources_with(&key, &all)
+            .into_iter()
+            .map(|id| (id, fixture::tile(id)))
+            .collect();
+        let t = tile_with(&key, &tiles, &all).unwrap().unwrap();
+        assert_eq!(t.height_floor, H_MIN);
+        let bytes = gx_core::surface::encode(&t, gx_core::matter::Compression::Zstd);
+        gx_core::surface::validate(&key, &bytes).unwrap();
     }
 
     #[test]
