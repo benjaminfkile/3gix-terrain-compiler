@@ -1,11 +1,19 @@
 //! The terrain module against the fixture world: the summit, the join
-//! across a tile edge, the mass, determinism, other frames, and the tiles
-//! each cell asks for.
+//! across a tile edge, the mass, determinism, other frames, the frame
+//! record, and the tiles each cell asks for.
 
+use gx_core::frame_record::{self, FrameRecord};
 use gx_core::key::{CellKey, ChunkKey};
 use gx_core::matter::{self, Section, State};
+use gx_core::module_io::{
+    decode_source_ids, encode_inputs, encode_request, encode_tiles, ModuleRequest,
+    Tile as ModuleTile,
+};
 use gx_core::registry;
+use gx_core::units::Meters;
+use gx_module_guest::{run_compile_v2, run_sources_v2};
 use std::collections::BTreeMap;
+use terrain_module::{Frame, TerrainModule};
 
 use gx_core::key::CellKey as Key;
 use terrain_module::compile::{self, CompileError, LAND_ALBEDO, SEAFLOOR_ALBEDO};
@@ -13,19 +21,23 @@ use terrain_tiles::{Presence, Tile};
 
 // The fixture world fills every tile, so these tests read it as a source set
 // whose fine tiles all exist.
+// The frame is the system module's record of it.
 fn sources(key: &ChunkKey) -> Vec<u64> {
-    compile::sources_with(key, &Presence::all())
+    compile::sources_with(&fixture::frame(), key, &Presence::all())
 }
 fn section(key: &Key, tiles: &BTreeMap<u64, Tile>) -> Result<Section, CompileError> {
-    compile::section_with(key, tiles, &Presence::all())
+    compile::section_with(&fixture::frame(), key, tiles, &Presence::all())
 }
 fn compile(key: &ChunkKey, tiles: &BTreeMap<u64, Tile>) -> Result<Vec<u8>, CompileError> {
-    compile::compile_with(key, tiles, &Presence::all())
+    compile::compile_with(&fixture::frame(), key, tiles, &Presence::all())
+}
+fn cell_at(depth: u8, p: [f64; 3]) -> Option<CellKey> {
+    plan::cell_at(&fixture::frame(), depth, p)
 }
 use terrain_module::fixture::{self, DEG, SUMMIT_ELEVATION};
 use terrain_module::frame::{FRAME_ID, RESOLUTION};
 use terrain_module::geodesy::{frame_point, geodetic, Geodetic};
-use terrain_module::plan::{self, cell_at, Plan};
+use terrain_module::plan::{self, Plan};
 use terrain_tiles::TileKey;
 
 /// The registry mass of the frame (the system module's data).
@@ -34,7 +46,7 @@ const FRAME_MASS: f64 = 5.972168399787584e24;
 fn cell(key: &str) -> CellKey {
     match key.parse::<ChunkKey>().unwrap() {
         ChunkKey::Cell(c) => c,
-        ChunkKey::Registry | ChunkKey::Surface(_) => panic!("a cell key"),
+        _ => panic!("a cell key"),
     }
 }
 
@@ -205,12 +217,9 @@ fn registry_is_empty_and_other_frames_are_empty() {
     let reg = registry::decode(&r).unwrap();
     assert!(reg.is_empty() && reg.epoch().value() == 0.0);
     assert!(sources(&ChunkKey::Registry).is_empty());
-    // Cells of every other frame the system module declares, including
-    // the cells that hold those frames' centers.
-    for &(frame_id, _) in terrain_module::frame::SYSTEM_FRAMES.iter() {
-        if frame_id == FRAME_ID {
-            continue;
-        }
+    // Cells of other frames, declared by the system module or not,
+    // including the cells that hold those frames' centers.
+    for frame_id in [0u64, 3, 5, 10, 77] {
         for (depth, i) in [(0u8, 0u32), (2, 1), (2, 2), (6, 32)] {
             let key = CellKey {
                 frame_id,
@@ -225,15 +234,82 @@ fn registry_is_empty_and_other_frames_are_empty() {
             assert!(matter::decode(&key, &bytes).unwrap().is_empty(), "{k}");
         }
     }
-    // A frame nobody declares has no known geometry.
-    let unknown = ChunkKey::Cell(CellKey {
-        frame_id: 77,
-        depth: 1,
-        x: 0,
-        y: 0,
-        z: 0,
+    // Frame keys get the empty record: the module declares no frame.
+    for id in [FRAME_ID, 0, 77] {
+        let k = ChunkKey::Frame(id);
+        assert!(sources(&k).is_empty());
+        let bytes = compile(&k, &Default::default()).unwrap();
+        assert_eq!(frame_record::decode(&bytes), Ok(FrameRecord::empty(id)));
+    }
+}
+
+/// The module's own entry points (module ABI v2) for `key` with these frame
+/// records: the section, or the failure reason.
+fn run_v2(key: &str, records: &[FrameRecord]) -> Result<Vec<u8>, String> {
+    let request = encode_request(&ModuleRequest {
+        origin_utc_ms: 0,
+        span_seconds: 0,
+        span_index: 0,
+        key: key.parse().unwrap(),
     });
-    assert!(compile(&unknown, &Default::default()).is_err());
+    let encoded: Vec<Vec<u8>> = records.iter().map(frame_record::encode).collect();
+    let refs: Vec<&[u8]> = encoded.iter().map(Vec::as_slice).collect();
+    let frames = encode_inputs(&refs).unwrap();
+    let ids = decode_source_ids(&run_sources_v2::<TerrainModule>(&request, &frames)?).unwrap();
+    let tile_bytes: Vec<(u64, Vec<u8>)> = ids
+        .iter()
+        .map(|&id| (id, fixture::tile(id).encode()))
+        .collect();
+    let tiles: Vec<ModuleTile> = tile_bytes
+        .iter()
+        .map(|(id, bytes)| ModuleTile { id: *id, bytes })
+        .collect();
+    let tiles = encode_tiles(&tiles).unwrap();
+    run_compile_v2::<TerrainModule>(&request, &tiles, &frames)
+}
+
+#[test]
+fn the_record_root_extent_sets_the_cell_geometry() {
+    let key = "4-3-4-4-4";
+    let cell = cell(key);
+    let mut half = fixture::record();
+    half.root_extent = Meters::new(fixture::record().root_extent.value() / 2.0);
+    let a = run_v2(key, &[fixture::record()]).unwrap();
+    let b = run_v2(key, &[half]).unwrap();
+    let (sa, sb) = (
+        matter::decode(&cell, &a).unwrap(),
+        matter::decode(&cell, &b).unwrap(),
+    );
+    let extent = fixture::record().root_extent.value();
+    assert_eq!(sa.edge().value(), extent / 8.0);
+    assert_eq!(sb.edge().value(), extent / 16.0);
+    assert_eq!(sa.origin().x, 0.0);
+    assert_eq!(sb.origin().x, 0.0);
+    // The same key at half the extent is a cube of half the edge, so it
+    // holds less of the planet: still solid at the center, less mass.
+    assert!(sb.mass().value() > 0.0 && sb.mass().value() < sa.mass().value());
+    // The plan follows the record too: a cell at the record's extent.
+    let frame = Frame::from_record(&half).unwrap();
+    let g = plan::geometry(&frame, &cell);
+    assert_eq!(g.edge.value(), sb.edge().value());
+}
+
+#[test]
+fn a_record_of_another_frame_fails() {
+    let mut other = fixture::record();
+    other.frame_id = 10;
+    let e = run_v2("4-3-4-4-4", &[other]).unwrap_err();
+    assert!(e.contains("frame 10") && e.contains("fills frame 4"), "{e}");
+    assert!(run_v2("registry", &[other]).is_err());
+}
+
+#[test]
+fn an_empty_record_fails() {
+    let e = run_v2("4-3-4-4-4", &[FrameRecord::empty(FRAME_ID)]).unwrap_err();
+    assert!(e.contains("empty"), "{e}");
+    // A frame key carries no records and gets the empty record.
+    let bytes = run_v2("frame-4", &[]).unwrap();
+    assert_eq!(bytes, frame_record::encode(&FrameRecord::empty(4)));
 }
 
 #[test]
@@ -251,8 +327,8 @@ fn cells_beyond_the_shell_need_no_tiles() {
     });
     let up = cell_at(12, above).unwrap();
     let down = cell_at(12, below).unwrap();
-    assert_eq!(plan::plan(&up), Ok(Plan::Empty));
-    assert_eq!(plan::plan(&down), Ok(Plan::Interior));
+    assert_eq!(plan::plan(&fixture::frame(), &up), Plan::Empty);
+    assert_eq!(plan::plan(&fixture::frame(), &down), Plan::Interior);
     assert!(build(&up).is_empty());
     let s = build(&down);
     let v = s.samples().unwrap();
@@ -401,8 +477,8 @@ fn occupancy_one_half_lies_on_the_elevation_surface() {
         let k = ChunkKey::Cell(key);
         let tiles = fixture::tiles(&sources(&k));
         let s = section(&key, &tiles).unwrap();
-        let level = match plan::plan_with(&key, &all) {
-            Ok(Plan::Surface { level, .. }) => level,
+        let level = match plan::plan_with(&fixture::frame(), &key, &all) {
+            Plan::Surface { level, .. } => level,
             other => panic!("{other:?}"),
         };
         let mut surface = Surface::new(GRID, level, &tiles, &all);

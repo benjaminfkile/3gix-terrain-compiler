@@ -8,13 +8,13 @@ use std::collections::BTreeMap;
 
 use gx_core::key::{CellKey, ChunkKey};
 use terrain_module::compile;
-use terrain_module::fixture::DEG;
+use terrain_module::fixture::{self, DEG};
 use terrain_module::geodesy::{frame_point, Geodetic};
 use terrain_module::plan::{cell_at, GRID};
 use terrain_tiles::{Tile, TileKey};
 
 fn check(key: CellKey) {
-    let ids = compile::sources(&ChunkKey::Cell(key));
+    let ids = compile::sources(&fixture::frame(), &ChunkKey::Cell(key));
     let tiles: BTreeMap<u64, Tile> = ids
         .iter()
         .map(|&id| {
@@ -22,14 +22,15 @@ fn check(key: CellKey) {
             (id, Tile::new(k, vec![0; GRID.tile_samples()]).unwrap())
         })
         .collect();
-    compile::section(&key, &tiles).unwrap_or_else(|e| panic!("{}: {e}", ChunkKey::Cell(key)));
+    compile::section(&fixture::frame(), &key, &tiles)
+        .unwrap_or_else(|e| panic!("{}: {e}", ChunkKey::Cell(key)));
 }
 
 #[test]
 fn a_cell_near_the_pole_across_a_level_4_tile_edge() {
     match "4-17-65414-65288-81877".parse::<ChunkKey>().unwrap() {
         ChunkKey::Cell(c) => check(c),
-        ChunkKey::Registry | ChunkKey::Surface(_) => unreachable!(),
+        _ => unreachable!(),
     }
 }
 
@@ -45,7 +46,7 @@ fn cells_around_the_globe_read_only_listed_tiles() {
                     lon: lon * DEG,
                     h: 0.0,
                 });
-                check(cell_at(depth, p).unwrap());
+                check(cell_at(&fixture::frame(), depth, p).unwrap());
             }
         }
     }

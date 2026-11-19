@@ -3,15 +3,20 @@
 //!
 //! Implements the determinism check of `space-model.md` section 4 item 6
 //! for this module. `conformance/` holds, per vector, `NAME.request.bin`
-//! (the request bytes of `client-compute.md` section 4), `NAME.tiles.bin`
-//! (the tile bytes passed to `gx_compile`: the fixture tiles of
-//! [`crate::fixture`] for exactly the ids `gx_sources` returns), and
-//! `NAME.sha256` (lowercase hex of the expected section), plus `index.json`
-//! saying what each covers. The core determinism harness runs the built
-//! module over them natively and under Node and requires these hashes from
-//! both. [`write`] regenerates the directory with the module's own entry
-//! points ([`gx_module_guest::run_sources`] and
-//! [`gx_module_guest::run_compile`]).
+//! (the request bytes of `client-compute.md` section 4), `NAME.frames.bin`
+//! (the frame bytes passed to `gx_inputs` and `gx_sources`, section 4.1:
+//! the system module's record of the frame, [`crate::fixture::record`]),
+//! `NAME.input-list.bin` (the input list `gx_inputs` returns: always
+//! empty), `NAME.tiles.bin` (the tile bytes passed to `gx_compile`: the
+//! fixture tiles of [`crate::fixture`] for exactly the ids `gx_sources`
+//! returns), `NAME.inputs.bin` (the input bytes passed to `gx_compile`: the
+//! frame record alone), and `NAME.sha256` (lowercase hex of the expected
+//! section), plus `index.json` saying what each covers. The core
+//! determinism harness runs the built module over them through module ABI
+//! v2 natively and under Node and requires these hashes from both.
+//! [`write`] regenerates the directory with the module's own entry points
+//! ([`gx_module_guest::run_inputs`], [`gx_module_guest::run_sources_v2`],
+//! and [`gx_module_guest::run_compile_v2`]).
 //!
 //! Requests carry origin 0 and span 0, as the hub sends them to a layer
 //! with `usesOrigin` false and `spanSeconds` 0.
@@ -19,9 +24,12 @@
 use std::fmt::Write as _;
 use std::path::Path;
 
-use gx_core::module_io::{decode_source_ids, encode_request, encode_tiles, ModuleRequest, Tile};
+use gx_core::frame_record;
+use gx_core::module_io::{
+    decode_source_ids, encode_inputs, encode_request, encode_tiles, ModuleRequest, Tile,
+};
 use gx_core::sha256::{sha256, to_hex};
-use gx_module_guest::{run_compile, run_sources};
+use gx_module_guest::{run_compile_v2, run_inputs, run_sources_v2};
 use terrain_tiles::TileKey;
 
 use crate::{fixture, TerrainModule};
@@ -112,10 +120,29 @@ impl Vector {
         })
     }
 
+    /// The frame bytes passed to `gx_inputs` and `gx_sources`: one frames
+    /// slot holding the system module's record of the frame.
+    pub fn frames(&self) -> Vec<u8> {
+        let record = frame_record::encode(&fixture::record());
+        encode_inputs(&[&record]).expect("one record")
+    }
+
+    /// The input list the module returns, through its own `gx_inputs`
+    /// logic.
+    pub fn input_list(&self) -> Result<Vec<u8>, String> {
+        run_inputs::<TerrainModule>(&self.request(), &self.frames())
+    }
+
+    /// The input bytes passed to `gx_compile`: the frame record alone, as
+    /// the module reads no layer slot.
+    pub fn inputs(&self) -> Vec<u8> {
+        self.frames()
+    }
+
     /// The tile ids the module asks for, through its own `gx_sources`
     /// logic.
     pub fn sources(&self) -> Result<Vec<u64>, String> {
-        let ids = run_sources::<TerrainModule>(&self.request())?;
+        let ids = run_sources_v2::<TerrainModule>(&self.request(), &self.frames())?;
         decode_source_ids(&ids).map_err(|e| e.to_string())
     }
 
@@ -135,7 +162,7 @@ impl Vector {
 
     /// The section the module returns, computed natively.
     pub fn section(&self) -> Result<Vec<u8>, String> {
-        run_compile::<TerrainModule>(&self.request(), &self.tiles()?)
+        run_compile_v2::<TerrainModule>(&self.request(), &self.tiles()?, &self.inputs())
     }
 }
 
@@ -146,10 +173,14 @@ pub fn files() -> Result<Vec<(String, Vec<u8>)>, String> {
     let mut index = String::from("{\n  \"cases\": {\n");
     for (i, vec) in VECTORS.iter().enumerate() {
         let tiles = vec.tiles()?;
-        let hash = to_hex(&sha256(&run_compile::<TerrainModule>(
+        let hash = to_hex(&sha256(&run_compile_v2::<TerrainModule>(
             &vec.request(),
             &tiles,
+            &vec.inputs(),
         )?));
+        out.push((format!("{}.frames.bin", vec.name), vec.frames()));
+        out.push((format!("{}.input-list.bin", vec.name), vec.input_list()?));
+        out.push((format!("{}.inputs.bin", vec.name), vec.inputs()));
         out.push((format!("{}.request.bin", vec.name), vec.request()));
         out.push((
             format!("{}.sha256", vec.name),

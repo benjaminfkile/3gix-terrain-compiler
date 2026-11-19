@@ -7,7 +7,10 @@
 //!
 //! - `registry`: the empty registry (section 5.3). The module declares no
 //!   frames; the system module declares the frame this one fills.
-//! - A cell: [`crate::plan::plan`] says what it needs. An empty plan gives
+//! - `frame-{id}`: the empty frame record (section 11.2), for the same
+//!   reason.
+//! - A cell: [`crate::plan::plan`] says what it needs, given the frame the
+//!   layer's frame record describes ([`Frame`]). An empty plan gives
 //!   an empty section (section 3.4). Otherwise the cell is sampled at
 //!   [`RESOLUTION`] per axis, each sample averaging
 //!   `SUBSAMPLES^3` stratified points exactly as the system module samples
@@ -85,16 +88,17 @@
 use std::collections::BTreeMap;
 
 use gx_core::error::ValidationError;
+use gx_core::frame_record::{self, FrameRecord};
 use gx_core::key::{CellGeometry, CellKey, ChunkKey};
 use gx_core::matter::{self, Compression, Sample, Samples, Section, State};
 use gx_core::registry::{self, Registry};
 use gx_core::units::{Attenuation, Density, Kelvin, Ratio};
 use terrain_tiles::{Presence, Tile, TileError};
 
-use crate::frame::{RESOLUTION, SUBSAMPLES};
+use crate::frame::{Frame, RESOLUTION, SUBSAMPLES};
 use crate::geodesy::{atan2, latitude_height, A, B, H_MAX, H_MIN, Q_SOLID, Q_VACUUM};
 use crate::interior::{self, SURFACE_RADIUS};
-use crate::plan::{self, Plan, PlanError, GRID};
+use crate::plan::{self, Plan, GRID};
 use crate::surface::Surface;
 
 /// Albedo of solid matter at or above the ellipsoid, three bands long to
@@ -110,8 +114,6 @@ pub const ROUGHNESS: f64 = 0.9;
 /// Why a key could not be compiled.
 #[derive(Clone, Debug, PartialEq)]
 pub enum CompileError {
-    /// The cell cannot be planned.
-    Plan(PlanError),
     /// A tile did not decode, or one the plan listed is missing.
     Tile(TileError),
     /// The section breaks a rule of the matter format.
@@ -121,7 +123,6 @@ pub enum CompileError {
 impl core::fmt::Display for CompileError {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
-            CompileError::Plan(e) => write!(f, "{e}"),
             CompileError::Tile(e) => write!(f, "{e}"),
             CompileError::Invalid(e) => write!(f, "section is invalid: {e}"),
         }
@@ -129,12 +130,6 @@ impl core::fmt::Display for CompileError {
 }
 
 impl std::error::Error for CompileError {}
-
-impl From<PlanError> for CompileError {
-    fn from(e: PlanError) -> Self {
-        CompileError::Plan(e)
-    }
-}
 
 impl From<TileError> for CompileError {
     fn from(e: TileError) -> Self {
@@ -149,16 +144,16 @@ impl From<ValidationError> for CompileError {
 }
 
 /// The source tile ids a key needs, ascending and unique: none for the
-/// registry, the plan's tiles for a cell.
-pub fn sources(key: &ChunkKey) -> Vec<u64> {
-    sources_with(key, plan::presence())
+/// registry and a frame key, the plan's tiles for a cell.
+pub fn sources(frame: &Frame, key: &ChunkKey) -> Vec<u64> {
+    sources_with(frame, key, plan::presence())
 }
 
 /// [`sources`] over a source set whose fine tiles are `presence`.
-pub fn sources_with(key: &ChunkKey, presence: &Presence) -> Vec<u64> {
+pub fn sources_with(frame: &Frame, key: &ChunkKey, presence: &Presence) -> Vec<u64> {
     match key {
-        ChunkKey::Registry => Vec::new(),
-        ChunkKey::Cell(cell) => plan::sources_with(cell, presence),
+        ChunkKey::Registry | ChunkKey::Frame(_) => Vec::new(),
+        ChunkKey::Cell(cell) => plan::sources_with(frame, cell, presence),
         ChunkKey::Surface(tile) => crate::surface_tile::sources_with(tile, presence),
     }
 }
@@ -176,21 +171,28 @@ pub fn decode_tiles<'a>(
 
 /// Compiles one key to its section bytes, validated with the library
 /// validator. `tiles` must hold the tiles [`sources`] lists for the key.
-pub fn compile(key: &ChunkKey, tiles: &BTreeMap<u64, Tile>) -> Result<Vec<u8>, CompileError> {
-    compile_with(key, tiles, plan::presence())
+pub fn compile(
+    frame: &Frame,
+    key: &ChunkKey,
+    tiles: &BTreeMap<u64, Tile>,
+) -> Result<Vec<u8>, CompileError> {
+    compile_with(frame, key, tiles, plan::presence())
 }
 
 /// [`compile`] over a source set whose fine tiles are `presence`.
 pub fn compile_with(
+    frame: &Frame,
     key: &ChunkKey,
     tiles: &BTreeMap<u64, Tile>,
     presence: &Presence,
 ) -> Result<Vec<u8>, CompileError> {
     let bytes = match key {
         ChunkKey::Registry => registry::encode(&Registry::empty()),
-        ChunkKey::Cell(cell) => {
-            matter::encode(&section_with(cell, tiles, presence)?, Compression::Zstd)
-        }
+        ChunkKey::Frame(id) => frame_record::encode(&FrameRecord::empty(*id)),
+        ChunkKey::Cell(cell) => matter::encode(
+            &section_with(frame, cell, tiles, presence)?,
+            Compression::Zstd,
+        ),
         ChunkKey::Surface(key) => match crate::surface_tile::tile_with(key, tiles, presence)? {
             Some(t) => gx_core::surface::encode(&t, Compression::Zstd),
             None => gx_core::surface::encode_empty(key),
@@ -201,18 +203,23 @@ pub fn compile_with(
 }
 
 /// The section of one cell, before encoding. See the module documentation.
-pub fn section(key: &CellKey, tiles: &BTreeMap<u64, Tile>) -> Result<Section, CompileError> {
-    section_with(key, tiles, plan::presence())
+pub fn section(
+    frame: &Frame,
+    key: &CellKey,
+    tiles: &BTreeMap<u64, Tile>,
+) -> Result<Section, CompileError> {
+    section_with(frame, key, tiles, plan::presence())
 }
 
 /// [`section`] over a source set whose fine tiles are `presence`.
 pub fn section_with(
+    frame: &Frame,
     key: &CellKey,
     tiles: &BTreeMap<u64, Tile>,
     presence: &Presence,
 ) -> Result<Section, CompileError> {
-    let g = plan::geometry(key)?;
-    let samples = match plan::plan_with(key, presence)? {
+    let g = plan::geometry(frame, key);
+    let samples = match plan::plan_with(frame, key, presence) {
         Plan::Empty => None,
         Plan::Interior => Some(sample_cell(&g, None)?),
         Plan::Surface { level, .. } => {
@@ -548,7 +555,7 @@ fn sample_cell(g: &CellGeometry, mut surface: Option<&mut Surface>) -> Result<Sa
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::fixture::DEG;
+    use crate::fixture::{frame, DEG};
     use crate::geodesy::{frame_point, Geodetic};
     use crate::plan::{cell_at, geometry};
 
@@ -566,8 +573,8 @@ mod tests {
                     lon: lon * DEG,
                     h: 0.0,
                 });
-                let key = cell_at(depth, p).unwrap();
-                let g = geometry(&key).unwrap();
+                let key = cell_at(&frame(), depth, p).unwrap();
+                let g = geometry(&frame(), &key);
                 let mut pts = Points::new(&g);
                 let n = usize::from(RESOLUTION);
                 let e = g.edge.value() / n as f64;

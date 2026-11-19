@@ -18,14 +18,50 @@
 //! - a trench to [`TRENCH_ELEVATION`] at latitude 0, longitude 2.5 degrees
 //!   ([`TRENCH`]).
 //!
+//! [`record`] is the frame record the system layer answers for the frame
+//! the module fills, built from the values the system module declares; the
+//! tests and the conformance vectors pass it as the layer's frames slot.
+//!
 //! Nothing here is part of the module's output path; the module itself
-//! never sees these values except through the tiles a vector carries.
+//! never sees these values except through the tiles and the frame record a
+//! vector carries.
 
 use core::f64::consts::PI;
 
+use gx_core::frame_record::FrameRecord;
+use gx_core::units::{Kilograms, Meters, Vec3};
 use terrain_tiles::{Tile, TileKey};
 
+use crate::frame::{Frame, FRAME_ID};
 use crate::plan::GRID;
+
+/// The record of frame [`FRAME_ID`] as the system module answers it
+/// (`matter-format.md` section 11), from the values of its data
+/// (`data/system.toml` in the system compiler repository): parent 0,
+/// `root_extent` 8 times the mean radius, `max_depth` 6, mass, `j2`, its
+/// reference radius, and the principal moments.
+pub fn record() -> FrameRecord {
+    FrameRecord {
+        empty: false,
+        frame_id: FRAME_ID,
+        parent_frame_id: 0,
+        root_extent: Meters::new(5.096808e7),
+        max_depth: 6,
+        mass: Kilograms::new(5.972168399787584e24),
+        j2: 0.00108263,
+        reference_radius: Meters::new(6378137.0),
+        principal_moments: Vec3::new(
+            7.992584813748298e37,
+            7.992584813748298e37,
+            8.018887480921225e37,
+        ),
+    }
+}
+
+/// The [`Frame`] of [`record`].
+pub fn frame() -> Frame {
+    Frame::from_record(&record()).expect("the system module's record of the frame")
+}
 
 /// One degree, radians.
 pub const DEG: f64 = PI / 180.0;

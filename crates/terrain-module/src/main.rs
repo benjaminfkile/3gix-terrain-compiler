@@ -1,6 +1,8 @@
 //! The terrain module's command line: compile, describe, and list the
 //! sources of a key natively, find the cell at a place, and regenerate the
-//! conformance vectors. It calls the same functions the module runs.
+//! conformance vectors. It calls the same functions the module runs, with
+//! the system module's record of the frame ([`fixture::record`]) as the
+//! layer's frame record.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -27,7 +29,10 @@ writes under out/tiles. --fixture uses the synthetic fixture tiles.
 
 bench times what gx_compile does for each key (decode the tile bytes,
 compile, encode, validate), RUNS times, and prints the median, minimum, and
-maximum in milliseconds. The tiles are read or made once, before timing.";
+maximum in milliseconds. The tiles are read or made once, before timing.
+
+Every command uses the system module's record of frame 4 as the frame
+record.";
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -45,7 +50,7 @@ fn run(args: &[String]) -> Result<(), String> {
     match cmd.as_str() {
         "sources" => {
             let key = parse_key(args.get(1))?;
-            for id in compile::sources(&key) {
+            for id in compile::sources(&fixture::frame(), &key) {
                 let k = TileKey::from_id(id).ok_or("bad id")?;
                 println!("{id} {k}");
             }
@@ -54,7 +59,8 @@ fn run(args: &[String]) -> Result<(), String> {
         "compile" | "describe" => {
             let key = parse_key(args.get(1))?;
             let tiles = load_tiles(&key, &args[2..])?;
-            let bytes = compile::compile(&key, &tiles).map_err(|e| e.to_string())?;
+            let bytes =
+                compile::compile(&fixture::frame(), &key, &tiles).map_err(|e| e.to_string())?;
             eprintln!("{} bytes sha256 {}", bytes.len(), to_hex(&sha256(&bytes)));
             if cmd == "describe" {
                 describe(&key, &bytes)?;
@@ -81,7 +87,7 @@ fn run(args: &[String]) -> Result<(), String> {
                 lon: num(2)? * DEG,
                 h: num(3)?,
             });
-            let key = plan::cell_at(depth, p).ok_or("outside the frame")?;
+            let key = plan::cell_at(&fixture::frame(), depth, p).ok_or("outside the frame")?;
             println!("{}", ChunkKey::Cell(key));
             Ok(())
         }
@@ -116,7 +122,7 @@ fn bench(args: &[String]) -> Result<(), String> {
             let start = std::time::Instant::now();
             let decoded = compile::decode_tiles(encoded.iter().map(|(id, b)| (*id, b.as_slice())))
                 .map_err(|e| e.to_string())?;
-            out = compile::compile(&key, &decoded).map_err(|e| e.to_string())?;
+            out = compile::compile(&fixture::frame(), &key, &decoded).map_err(|e| e.to_string())?;
             times.push(start.elapsed().as_secs_f64() * 1e3);
         }
         times.sort_by(f64::total_cmp);
@@ -151,7 +157,7 @@ fn flag(args: &[String], name: &str) -> Option<String> {
 }
 
 fn load_tiles(key: &ChunkKey, args: &[String]) -> Result<BTreeMap<u64, Tile>, String> {
-    let ids = compile::sources(key);
+    let ids = compile::sources(&fixture::frame(), key);
     if args.iter().any(|a| a == "--fixture") {
         return Ok(fixture::tiles(&ids));
     }
