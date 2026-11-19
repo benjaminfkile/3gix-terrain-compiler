@@ -34,8 +34,9 @@ fn compile(key: &ChunkKey, tiles: &BTreeMap<u64, Tile>) -> Result<Vec<u8>, Compi
 fn cell_at(depth: u8, p: [f64; 3]) -> Option<CellKey> {
     plan::cell_at(&fixture::frame(), depth, p)
 }
+use terrain_module::fixture::FRAME_ID;
 use terrain_module::fixture::{self, DEG, SUMMIT_ELEVATION};
-use terrain_module::frame::{FRAME_ID, RESOLUTION};
+use terrain_module::frame::RESOLUTION;
 use terrain_module::geodesy::{frame_point, geodetic, Geodetic};
 use terrain_module::plan::{self, Plan};
 use terrain_tiles::TileKey;
@@ -295,12 +296,31 @@ fn the_record_root_extent_sets_the_cell_geometry() {
 }
 
 #[test]
-fn a_record_of_another_frame_fails() {
+fn the_record_chooses_the_frame() {
+    // The same record under another frame id: the module fills that frame
+    // with the same matter, and the frame it no longer names is empty.
     let mut other = fixture::record();
-    other.frame_id = 10;
-    let e = run_v2("4-3-4-4-4", &[other]).unwrap_err();
-    assert!(e.contains("frame 10") && e.contains("fills frame 4"), "{e}");
-    assert!(run_v2("registry", &[other]).is_err());
+    other.frame_id = 12;
+    let own = run_v2("4-3-4-4-4", &[fixture::record()]).unwrap();
+    let moved = run_v2("12-3-4-4-4", &[other]).unwrap();
+    let (a, b) = (
+        matter::decode(&cell("4-3-4-4-4"), &own).unwrap(),
+        matter::decode(&cell("12-3-4-4-4"), &moved).unwrap(),
+    );
+    assert!(!a.is_empty());
+    assert_eq!(a.mass().value(), b.mass().value());
+    assert_eq!(a.edge().value(), b.edge().value());
+    let left = run_v2("4-3-4-4-4", &[other]).unwrap();
+    assert!(matter::decode(&cell("4-3-4-4-4"), &left)
+        .unwrap()
+        .is_empty());
+    // Surface tiles follow the record the same way.
+    let tile = run_v2("s-12-0-0-0-0", &[other]).unwrap();
+    let own_tile = run_v2("s-4-0-0-0-0", &[fixture::record()]).unwrap();
+    assert_eq!(tile.len(), own_tile.len());
+    assert!(tile.len() > 64, "a tile with a surface");
+    let empty_tile = run_v2("s-4-0-0-0-0", &[other]).unwrap();
+    assert_eq!(empty_tile.len(), 64, "the header alone");
 }
 
 #[test]

@@ -11,8 +11,9 @@
 //! profile below, no water.
 //!
 //! - [`TerrainModule`]: the module. Its layer reads one input, a frames
-//!   slot with the system layer's record of frame [`frame::FRAME_ID`]:
-//!   `"inputs": [{"layer": "system", "frames": [4]}]`. `gx_inputs` asks for
+//!   slot with the record of the frame it fills, which the layer config
+//!   chooses: `"inputs": [{"layer": "system", "frames": [4]}]` for the
+//!   system module's frame 4. `gx_inputs` asks for
 //!   no sections; `gx_sources` lists the tiles a cell needs ([`plan`]);
 //!   `gx_compile` builds the cell ([`compile`]). The registry key gets the
 //!   empty registry and a frame key the empty record.
@@ -61,13 +62,13 @@ pub use plan::Plan;
 ///
 /// The request's origin and span are ignored: the layer's `usesOrigin` is
 /// false and its `spanSeconds` 0. Every key but a frame key needs the one
-/// frame record, which must be the non-empty record of
-/// [`frame::FRAME_ID`] ([`Frame::from_records`]); otherwise `gx_sources`
+/// frame record, the non-empty record of the frame the layer fills
+/// ([`Frame::from_records`]); otherwise `gx_sources`
 /// lists no tiles and `gx_compile` fails with the reason.
 pub struct TerrainModule;
 
 impl ModuleV2 for TerrainModule {
-    /// Slot 0 lists one frame, [`frame::FRAME_ID`].
+    /// Slot 0 lists one frame, the one the layer fills.
     const FRAMES_SLOTS: &'static [FramesSlot] = &[FramesSlot { slot: 0, frames: 1 }];
 
     /// The layer has no layer slots: always empty.

@@ -32,7 +32,11 @@ use gx_core::frame_record::FrameRecord;
 use gx_core::units::{Kilograms, Meters, Vec3};
 use terrain_tiles::{Tile, TileKey};
 
-use crate::frame::{Frame, FRAME_ID};
+use crate::frame::Frame;
+
+/// The frame id the system module gives the frame the fixture describes
+/// (its `data/system.toml`): test data, not a module constant.
+pub const FRAME_ID: u64 = 4;
 use crate::plan::GRID;
 
 /// The record of frame [`FRAME_ID`] as the system module answers it

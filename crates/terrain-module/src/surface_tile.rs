@@ -22,7 +22,6 @@ use gx_core::surface::{
 use terrain_tiles::{Presence, Tile, TileError};
 
 use crate::compile::{LAND_ALBEDO, ROUGHNESS, SEAFLOOR_ALBEDO};
-use crate::frame::FRAME_ID;
 use crate::geodesy::{atan2, A, B, H_MIN};
 use crate::plan::{ANGLE_MARGIN, GRID};
 use crate::surface::Surface;
@@ -119,9 +118,9 @@ fn bounds(key: &SurfaceKey, pole_margin: f64) -> (f64, f64, f64, f64) {
 
 /// The source tiles of a surface key: those of its level's pyramid level
 /// and of its parent's, over the tile's box, ascending and unique. None for
-/// other frames and levels past [`MAX_LEVEL`].
+/// levels past [`MAX_LEVEL`]. The caller checks the frame.
 pub fn sources_with(key: &SurfaceKey, presence: &Presence) -> Vec<u64> {
-    if key.frame_id != FRAME_ID || key.level > MAX_LEVEL {
+    if key.level > MAX_LEVEL {
         return Vec::new();
     }
     let coarsest = level_for_tile(key.parent().map_or(key.level, |p| p.level));
@@ -139,14 +138,14 @@ pub fn sources_with(key: &SurfaceKey, presence: &Presence) -> Vec<u64> {
     ids
 }
 
-/// One surface tile, or `None` for a tile with no surface (another frame,
-/// or past [`MAX_LEVEL`]).
+/// One surface tile, or `None` for a tile with no surface (past
+/// [`MAX_LEVEL`]). The caller checks the frame.
 pub fn tile_with(
     key: &SurfaceKey,
     tiles: &BTreeMap<u64, Tile>,
     presence: &Presence,
 ) -> Result<Option<SurfaceTile>, TileError> {
-    if key.frame_id != FRAME_ID || key.level > MAX_LEVEL {
+    if key.level > MAX_LEVEL {
         return Ok(None);
     }
     let mut own = Surface::new(GRID, level_for_tile(key.level), tiles, presence);
@@ -223,7 +222,7 @@ mod tests {
     #[test]
     fn parent_heights_are_the_parents_own() {
         let all = Presence::all();
-        let child = SurfaceKey::new(FRAME_ID, 0, 6, 33, 17).unwrap();
+        let child = SurfaceKey::new(4, 0, 6, 33, 17).unwrap();
         let parent = child.parent().unwrap();
         let ids: Vec<u64> = sources_with(&child, &all)
             .into_iter()
@@ -248,7 +247,7 @@ mod tests {
     #[test]
     fn tiles_declare_the_clamp_as_their_floor() {
         let all = Presence::all();
-        let key = SurfaceKey::new(FRAME_ID, 1, 3, 2, 5).unwrap();
+        let key = SurfaceKey::new(4, 1, 3, 2, 5).unwrap();
         let tiles: BTreeMap<u64, Tile> = sources_with(&key, &all)
             .into_iter()
             .map(|id| (id, fixture::tile(id)))
@@ -262,8 +261,8 @@ mod tests {
     #[test]
     fn neighbors_share_their_edge_heights() {
         let all = Presence::all();
-        let left = SurfaceKey::new(FRAME_ID, 2, 5, 9, 4).unwrap();
-        let right = SurfaceKey::new(FRAME_ID, 2, 5, 10, 4).unwrap();
+        let left = SurfaceKey::new(4, 2, 5, 9, 4).unwrap();
+        let right = SurfaceKey::new(4, 2, 5, 10, 4).unwrap();
         let ids: Vec<u64> = sources_with(&left, &all)
             .into_iter()
             .chain(sources_with(&right, &all))

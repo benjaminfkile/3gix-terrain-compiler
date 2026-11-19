@@ -16,7 +16,7 @@
 //! ellipsoidal radius ([`crate::geodesy::q2`]), which is exact for a box:
 //!
 //! - [`Plan::Empty`]: the cube is entirely above `H_MAX`, or deeper than
-//!   [`MAX_DEPTH`], or in another frame than [`FRAME_ID`]. No sources, an empty section.
+//!   [`MAX_DEPTH`], or in another frame than the record's. No sources, an empty section.
 //! - [`Plan::Interior`]: the cube is entirely below `H_MIN`. No sources;
 //!   every sample is solid with the interior profile.
 //! - [`Plan::Surface`]: the cube meets the shell. The level and the tiles
@@ -60,7 +60,7 @@ use std::sync::OnceLock;
 
 use terrain_tiles::{Grid, Presence};
 
-use crate::frame::{Frame, FRAME_ID, MAX_DEPTH, RESOLUTION};
+use crate::frame::{Frame, MAX_DEPTH, RESOLUTION};
 use crate::geodesy::{atan2, A, B, Q_SOLID, Q_VACUUM, TAN_RATIO};
 
 /// The elevation grid the module reads: GLO-30 on land, GEBCO under the
@@ -105,8 +105,8 @@ pub enum Plan {
 }
 
 /// The cube of a cell in a frame of the record's `root_extent`: the cell's
-/// own cube for a cell of [`FRAME_ID`] (see [`crate::frame`] for other
-/// frames).
+/// own cube for a cell of the record's frame (see [`crate::frame`] for
+/// other frames).
 pub fn geometry(frame: &Frame, key: &CellKey) -> CellGeometry {
     key.geometry(Meters::new(frame.root_extent))
 }
@@ -118,7 +118,7 @@ pub fn plan(frame: &Frame, key: &CellKey) -> Plan {
 
 /// The plan of one cell over a source set whose fine tiles are `presence`.
 pub fn plan_with(frame: &Frame, key: &CellKey, presence: &Presence) -> Plan {
-    if key.frame_id != FRAME_ID || key.depth > MAX_DEPTH {
+    if key.frame_id != frame.frame_id || key.depth > MAX_DEPTH {
         return Plan::Empty;
     }
     let b = Bounds::of(&geometry(frame, key));
@@ -162,7 +162,7 @@ pub fn level_for_depth(frame: &Frame, depth: u8) -> u8 {
     level
 }
 
-/// The cell of frame [`FRAME_ID`] at `depth` that holds the frame point
+/// The cell of the record's frame at `depth` that holds the frame point
 /// `p` (meters), or `None` if `p` is outside the frame's cube.
 pub fn cell_at(frame: &Frame, depth: u8, p: [f64; 3]) -> Option<CellKey> {
     let cells = 1u64 << depth;
@@ -172,7 +172,7 @@ pub fn cell_at(frame: &Frame, depth: u8, p: [f64; 3]) -> Option<CellKey> {
         (i >= 0.0 && i < cells as f64).then_some(i as u32)
     };
     Some(CellKey {
-        frame_id: FRAME_ID,
+        frame_id: frame.frame_id,
         depth,
         x: index(p[0])?,
         y: index(p[1])?,
@@ -311,7 +311,7 @@ mod tests {
     #[test]
     fn classes() {
         let key = |d, x, y, z| CellKey {
-            frame_id: FRAME_ID,
+            frame_id: 4,
             depth: d,
             x,
             y,

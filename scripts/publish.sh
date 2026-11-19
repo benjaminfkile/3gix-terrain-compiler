@@ -15,12 +15,15 @@
 #   GX_HUB_URL    hub base URL, without a trailing slash
 #   GX_API_KEY    an API key with the admin capability (X-API-Key)
 #   GX_SPACE_ID   the space to put the layer in
+#   GX_FRAME_ID   the frame the layer fills (default 4, the system
+#                 module's frame for this data)
 #
-# The layer config: attached to frame 4 alone and exclusively (it replaces
-# the system module's coarse matter there), max depth 21, usesOrigin false
-# (the matter does not depend on the origin), spanSeconds 0 (it never
-# changes), and one input: frame 4's record from the `system` layer
-# (client-compute.md section 10.2), slot 0.
+# The layer config: attached to frame GX_FRAME_ID alone and exclusively (it
+# replaces the system module's coarse matter there), max depth 21,
+# usesOrigin false (the matter does not depend on the origin), spanSeconds 0
+# (it never changes), and one input: that frame's record from the `system`
+# layer (client-compute.md section 10.2), slot 0. The module fills whichever
+# frame the record names.
 set -eu
 
 cd "$(dirname "$0")/.."
@@ -41,6 +44,10 @@ fi
 : "${GX_HUB_URL:?set GX_HUB_URL}"
 : "${GX_API_KEY:?set GX_API_KEY}"
 : "${GX_SPACE_ID:?set GX_SPACE_ID}"
+frame=${GX_FRAME_ID:-4}
+case "$frame" in
+    ""|*[!0-9]*) echo "GX_FRAME_ID must be a frame id (digits)" >&2; exit 2 ;;
+esac
 
 sh scripts/build-module.sh
 wasm=target/module/terrain.wasm
@@ -58,8 +65,8 @@ case "$reply" in
     *) echo "the hub returned a hash other than $hash" >&2; exit 1 ;;
 esac
 
-config=$(printf '{"module":"%s","sourceManifest":"%s","attachment":[4],"exclusive":true,"maxDepth":{"4":21},"spanSeconds":0,"usesOrigin":false,"inputs":[{"layer":"system","frames":[4]}]}' \
-    "$hash" "$manifest")
+config=$(printf '{"module":"%s","sourceManifest":"%s","attachment":[%s],"exclusive":true,"maxDepth":{"%s":21},"spanSeconds":0,"usesOrigin":false,"inputs":[{"layer":"system","frames":[%s]}]}' \
+    "$hash" "$manifest" "$frame" "$frame" "$frame")
 
 echo "== PUT /space/{id}/layer/terrain"
 echo "$config"

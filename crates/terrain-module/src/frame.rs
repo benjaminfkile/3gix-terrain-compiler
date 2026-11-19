@@ -1,14 +1,15 @@
-//! The frame this module fills, its size from the frame record the layer
-//! reads, and the depth and resolution of its cells.
+//! The frame this module fills, as the frame record the layer reads
+//! describes it, and the depth and resolution of its cells.
 //!
 //! Frame ids are a convention between compiler authors (`matter-format.md`
-//! section 5.2): the system module declares the frames, this module attaches
-//! matter to one of them. The layer is attached to [`FRAME_ID`] alone
-//! (`space-model.md` section 8) and reads that frame's record from the
-//! system layer through its one frames slot (`client-compute.md` sections
-//! 4.1 and 10.2, `matter-format.md` section 11). The frame's size,
-//! `root_extent`, comes from the record alone: the module holds no copy of
-//! it.
+//! section 5.2): a system module declares the frames, this module builds the
+//! matter of one of them. Which one is the layer config's choice alone: the
+//! layer is attached to one frame (`space-model.md` section 8) and reads that
+//! frame's record through its one frames slot (`client-compute.md` sections
+//! 4.1 and 10.2, `matter-format.md` section 11), for example
+//! `"attachment": [4], "inputs": [{"layer": "system", "frames": [4]}]`.
+//! The module fills the frame the record names, at the record's
+//! `root_extent`; it holds no frame id and no size of its own.
 //!
 //! The hub never directs the layer for another frame. If asked anyway, the
 //! module answers every cell and surface key of another frame with an empty
@@ -17,9 +18,6 @@
 //! the record's `root_extent`.
 
 use gx_core::frame_record::FrameRecord;
-
-/// The frame whose whole matter this module builds: the layer's attachment.
-pub const FRAME_ID: u64 = 4;
 
 /// The deepest cell the module fills: at depth 21 a cell is 24.3 m on an
 /// edge and its samples 0.76 m apart for the frame's `root_extent` of
@@ -36,6 +34,8 @@ pub const SUBSAMPLES: u32 = 4;
 /// The frame the module fills, as its frame record describes it.
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub struct Frame {
+    /// The frame the record describes: the frame the module fills.
+    pub frame_id: u64,
     /// Edge of the frame's root cube, meters.
     pub root_extent: f64,
 }
@@ -48,8 +48,6 @@ pub enum FrameError {
     Count(usize),
     /// The record is empty: its layer's module does not declare the frame.
     Empty(u64),
-    /// The record describes another frame than [`FRAME_ID`].
-    OtherFrame(u64),
 }
 
 impl core::fmt::Display for FrameError {
@@ -57,15 +55,11 @@ impl core::fmt::Display for FrameError {
         match self {
             FrameError::Count(n) => write!(
                 f,
-                "{n} frame records passed; the module reads exactly the record of frame {FRAME_ID}"
+                "{n} frame records passed; the module reads exactly one, the record of the frame it fills"
             ),
             FrameError::Empty(id) => write!(
                 f,
                 "the record of frame {id} is empty: the system layer does not declare the frame, so its root extent is unknown"
-            ),
-            FrameError::OtherFrame(id) => write!(
-                f,
-                "the frame record is of frame {id}; the module fills frame {FRAME_ID} and reads its record"
             ),
         }
     }
@@ -74,22 +68,20 @@ impl core::fmt::Display for FrameError {
 impl std::error::Error for FrameError {}
 
 impl Frame {
-    /// The frame of a record: the record must be the non-empty record of
-    /// [`FRAME_ID`].
+    /// The frame of a record: the frame it names, which must be declared
+    /// (a non-empty record).
     pub fn from_record(record: &FrameRecord) -> Result<Frame, FrameError> {
-        if record.frame_id != FRAME_ID {
-            return Err(FrameError::OtherFrame(record.frame_id));
-        }
         if record.empty {
             return Err(FrameError::Empty(record.frame_id));
         }
         Ok(Frame {
+            frame_id: record.frame_id,
             root_extent: record.root_extent.value(),
         })
     }
 
-    /// The frame of the records passed to the module: exactly one, the
-    /// record of [`FRAME_ID`] (see [`Frame::from_record`]).
+    /// The frame of the records passed to the module: exactly one non-empty
+    /// record (see [`Frame::from_record`]).
     pub fn from_records(records: &[FrameRecord]) -> Result<Frame, FrameError> {
         match records {
             [r] => Frame::from_record(r),
@@ -114,24 +106,39 @@ mod tests {
 
     #[test]
     fn surface_sample_spacing_at_max_depth_is_under_a_meter() {
-        let f = Frame::from_record(&record(FRAME_ID, 5.096808e7)).unwrap();
+        let f = Frame::from_record(&record(4, 5.096808e7)).unwrap();
         let spacing = f.root_extent / f64::from(1u32 << MAX_DEPTH) / f64::from(RESOLUTION);
         assert!(spacing < 1.0 && spacing > 0.5, "{spacing}");
     }
 
     #[test]
-    fn records_that_do_not_describe_the_frame_fail() {
+    fn the_record_names_the_frame() {
+        for id in [3, 4, 12] {
+            assert_eq!(
+                Frame::from_record(&record(id, 1e7)),
+                Ok(Frame {
+                    frame_id: id,
+                    root_extent: 1e7
+                })
+            );
+        }
+    }
+
+    #[test]
+    fn records_that_do_not_describe_a_frame_fail() {
         assert_eq!(
-            Frame::from_record(&record(3, 1e7)),
-            Err(FrameError::OtherFrame(3))
-        );
-        assert_eq!(
-            Frame::from_record(&FrameRecord::empty(FRAME_ID)),
-            Err(FrameError::Empty(FRAME_ID))
+            Frame::from_record(&FrameRecord::empty(4)),
+            Err(FrameError::Empty(4))
         );
         assert_eq!(Frame::from_records(&[]), Err(FrameError::Count(0)));
-        let r = record(FRAME_ID, 1e7);
+        let r = record(4, 1e7);
         assert_eq!(Frame::from_records(&[r, r]), Err(FrameError::Count(2)));
-        assert_eq!(Frame::from_records(&[r]), Ok(Frame { root_extent: 1e7 }));
+        assert_eq!(
+            Frame::from_records(&[r]),
+            Ok(Frame {
+                frame_id: 4,
+                root_extent: 1e7
+            })
+        );
     }
 }

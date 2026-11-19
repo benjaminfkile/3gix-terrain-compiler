@@ -154,7 +154,10 @@ pub fn sources_with(frame: &Frame, key: &ChunkKey, presence: &Presence) -> Vec<u
     match key {
         ChunkKey::Registry | ChunkKey::Frame(_) => Vec::new(),
         ChunkKey::Cell(cell) => plan::sources_with(frame, cell, presence),
-        ChunkKey::Surface(tile) => crate::surface_tile::sources_with(tile, presence),
+        ChunkKey::Surface(tile) if tile.frame_id == frame.frame_id => {
+            crate::surface_tile::sources_with(tile, presence)
+        }
+        ChunkKey::Surface(_) => Vec::new(),
     }
 }
 
@@ -193,10 +196,13 @@ pub fn compile_with(
             &section_with(frame, cell, tiles, presence)?,
             Compression::Zstd,
         ),
-        ChunkKey::Surface(key) => match crate::surface_tile::tile_with(key, tiles, presence)? {
-            Some(t) => gx_core::surface::encode(&t, Compression::Zstd),
-            None => gx_core::surface::encode_empty(key),
-        },
+        ChunkKey::Surface(key) if key.frame_id == frame.frame_id => {
+            match crate::surface_tile::tile_with(key, tiles, presence)? {
+                Some(t) => gx_core::surface::encode(&t, Compression::Zstd),
+                None => gx_core::surface::encode_empty(key),
+            }
+        }
+        ChunkKey::Surface(key) => gx_core::surface::encode_empty(key),
     };
     gx_core::validate(&key.to_string(), &bytes)?;
     Ok(bytes)
