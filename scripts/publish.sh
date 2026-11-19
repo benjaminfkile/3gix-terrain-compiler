@@ -19,7 +19,8 @@
 # The layer config: attached to frame 4 alone and exclusively (it replaces
 # the system module's coarse matter there), max depth 21, usesOrigin false
 # (the matter does not depend on the origin), spanSeconds 0 (it never
-# changes).
+# changes), and one input: frame 4's record from the `system` layer
+# (client-compute.md section 10.2), slot 0.
 set -eu
 
 cd "$(dirname "$0")/.."
@@ -57,7 +58,7 @@ case "$reply" in
     *) echo "the hub returned a hash other than $hash" >&2; exit 1 ;;
 esac
 
-config=$(printf '{"module":"%s","sourceManifest":"%s","attachment":[4],"exclusive":true,"maxDepth":{"4":21},"spanSeconds":0,"usesOrigin":false}' \
+config=$(printf '{"module":"%s","sourceManifest":"%s","attachment":[4],"exclusive":true,"maxDepth":{"4":21},"spanSeconds":0,"usesOrigin":false,"inputs":[{"layer":"system","frames":[4]}]}' \
     "$hash" "$manifest")
 
 echo "== PUT /space/{id}/layer/terrain"
