@@ -3,7 +3,8 @@
 //! level holds for the cell.
 //!
 //! This is the `gx_sources` half of the module (`client-compute.md` section
-//! 4): [`plan`] is a function of the chunk key alone, and the compiler
+//! 4.1): [`plan`] is a function of the chunk key and the frame's record
+//! ([`Frame`]) alone, and the compiler
 //! ([`crate::compile`]) follows the same plan, so the tiles it reads are
 //! always among the ones the plan listed.
 //!
@@ -15,7 +16,7 @@
 //! ellipsoidal radius ([`crate::geodesy::q2`]), which is exact for a box:
 //!
 //! - [`Plan::Empty`]: the cube is entirely above `H_MAX`, or deeper than
-//!   [`MAX_DEPTH`], or in another frame. No sources, an empty section.
+//!   [`MAX_DEPTH`], or in another frame than [`FRAME_ID`]. No sources, an empty section.
 //! - [`Plan::Interior`]: the cube is entirely below `H_MIN`. No sources;
 //!   every sample is solid with the interior profile.
 //! - [`Plan::Surface`]: the cube meets the shell. The level and the tiles
@@ -59,7 +60,7 @@ use std::sync::OnceLock;
 
 use terrain_tiles::{Grid, Presence};
 
-use crate::frame::{root_extent, FRAME_ID, MAX_DEPTH, RESOLUTION, ROOT_EXTENT};
+use crate::frame::{Frame, FRAME_ID, MAX_DEPTH, RESOLUTION};
 use crate::geodesy::{atan2, A, B, Q_SOLID, Q_VACUUM, TAN_RATIO};
 
 /// The elevation grid the module reads: GLO-30 on land, GEBCO under the
@@ -103,77 +104,56 @@ pub enum Plan {
     },
 }
 
-/// Why a cell cannot be planned.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum PlanError {
-    /// The cell is in a frame the system module does not declare, so its
-    /// geometry is unknown.
-    UnknownFrame(u64),
-}
-
-impl core::fmt::Display for PlanError {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        match self {
-            PlanError::UnknownFrame(id) => write!(
-                f,
-                "frame {id} is not declared by the system registry; its root extent is unknown"
-            ),
-        }
-    }
-}
-
-impl std::error::Error for PlanError {}
-
-/// The cube of a cell of any frame the system module declares.
-pub fn geometry(key: &CellKey) -> Result<CellGeometry, PlanError> {
-    let extent = root_extent(key.frame_id).ok_or(PlanError::UnknownFrame(key.frame_id))?;
-    Ok(key.geometry(Meters::new(extent)))
+/// The cube of a cell in a frame of the record's `root_extent`: the cell's
+/// own cube for a cell of [`FRAME_ID`] (see [`crate::frame`] for other
+/// frames).
+pub fn geometry(frame: &Frame, key: &CellKey) -> CellGeometry {
+    key.geometry(Meters::new(frame.root_extent))
 }
 
 /// The plan of one cell, with the module's own presence map.
-pub fn plan(key: &CellKey) -> Result<Plan, PlanError> {
-    plan_with(key, presence())
+pub fn plan(frame: &Frame, key: &CellKey) -> Plan {
+    plan_with(frame, key, presence())
 }
 
 /// The plan of one cell over a source set whose fine tiles are `presence`.
-pub fn plan_with(key: &CellKey, presence: &Presence) -> Result<Plan, PlanError> {
-    let g = geometry(key)?;
+pub fn plan_with(frame: &Frame, key: &CellKey, presence: &Presence) -> Plan {
     if key.frame_id != FRAME_ID || key.depth > MAX_DEPTH {
-        return Ok(Plan::Empty);
+        return Plan::Empty;
     }
-    let b = Bounds::of(&g);
+    let b = Bounds::of(&geometry(frame, key));
     let (q2_min, q2_max) = b.q2_range();
     if q2_min > Q_VACUUM * Q_VACUUM {
-        return Ok(Plan::Empty);
+        return Plan::Empty;
     }
     if q2_max < Q_SOLID * Q_SOLID {
-        return Ok(Plan::Interior);
+        return Plan::Interior;
     }
-    let level = level_for_depth(key.depth);
+    let level = level_for_depth(frame, key.depth);
     let (lat_lo, lat_hi) = b.latitude_range();
     let (lon_lo, lon_hi) = b.longitude_range();
     let tiles = presence.tiles_for_region(&GRID, level, lat_lo, lat_hi, lon_lo, lon_hi);
-    Ok(Plan::Surface { level, tiles })
+    Plan::Surface { level, tiles }
 }
 
 /// The tiles a cell needs: the plan's tiles, or none.
-pub fn sources(key: &CellKey) -> Vec<u64> {
-    sources_with(key, presence())
+pub fn sources(frame: &Frame, key: &CellKey) -> Vec<u64> {
+    sources_with(frame, key, presence())
 }
 
 /// [`sources`] over a source set whose fine tiles are `presence`.
-pub fn sources_with(key: &CellKey, presence: &Presence) -> Vec<u64> {
-    match plan_with(key, presence) {
-        Ok(Plan::Surface { tiles, .. }) => tiles,
+pub fn sources_with(frame: &Frame, key: &CellKey, presence: &Presence) -> Vec<u64> {
+    match plan_with(frame, key, presence) {
+        Plan::Surface { tiles, .. } => tiles,
         _ => Vec::new(),
     }
 }
 
 /// The pyramid level a cell of `depth` reads (module documentation): the
 /// largest level `k` with `A * spacing(0) * 2^k` at most the cell's sample
-/// spacing `ROOT_EXTENT / 2^depth / RESOLUTION`, and 0 if none is.
-pub fn level_for_depth(depth: u8) -> u8 {
-    let spacing = ROOT_EXTENT / (1u64 << depth) as f64 / f64::from(RESOLUTION);
+/// spacing `root_extent / 2^depth / RESOLUTION`, and 0 if none is.
+pub fn level_for_depth(frame: &Frame, depth: u8) -> u8 {
+    let spacing = frame.root_extent / (1u64 << depth) as f64 / f64::from(RESOLUTION);
     let base = A * GRID.spacing(0);
     let mut level = 0u8;
     while level < GRID.top_level() && base * (2u64 << level) as f64 <= spacing {
@@ -184,11 +164,11 @@ pub fn level_for_depth(depth: u8) -> u8 {
 
 /// The cell of frame [`FRAME_ID`] at `depth` that holds the frame point
 /// `p` (meters), or `None` if `p` is outside the frame's cube.
-pub fn cell_at(depth: u8, p: [f64; 3]) -> Option<CellKey> {
+pub fn cell_at(frame: &Frame, depth: u8, p: [f64; 3]) -> Option<CellKey> {
     let cells = 1u64 << depth;
-    let edge = ROOT_EXTENT / cells as f64;
+    let edge = frame.root_extent / cells as f64;
     let index = |v: f64| -> Option<u32> {
-        let i = ((v + ROOT_EXTENT / 2.0) / edge).floor();
+        let i = ((v + frame.root_extent / 2.0) / edge).floor();
         (i >= 0.0 && i < cells as f64).then_some(i as u32)
     };
     Some(CellKey {
@@ -317,10 +297,11 @@ fn nearest_to_zero(a: f64, b: f64) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::fixture::frame;
 
     #[test]
     fn levels_by_depth() {
-        let levels: Vec<u8> = (0..=21).map(level_for_depth).collect();
+        let levels: Vec<u8> = (0..=21).map(|d| level_for_depth(&frame(), d)).collect();
         assert_eq!(
             levels,
             [10, 10, 10, 10, 10, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0, 0, 0, 0, 0, 0, 0]
@@ -336,28 +317,26 @@ mod tests {
             y,
             z,
         };
+        let plan = |k: &CellKey| plan(&frame(), k);
         // The cell holding the center at depth 8 is deep inside.
-        assert_eq!(plan(&key(8, 128, 128, 128)), Ok(Plan::Interior));
+        assert_eq!(plan(&key(8, 128, 128, 128)), Plan::Interior);
         // A corner of the frame is empty.
-        assert_eq!(plan(&key(4, 0, 0, 0)), Ok(Plan::Empty));
+        assert_eq!(plan(&key(4, 0, 0, 0)), Plan::Empty);
         // Too deep.
-        assert_eq!(plan(&key(22, 0, 0, 0)), Ok(Plan::Empty));
-        // Another frame.
-        assert_eq!(
-            plan(&CellKey {
-                frame_id: 3,
-                ..key(2, 1, 1, 1)
-            }),
-            Ok(Plan::Empty)
-        );
-        assert!(plan(&CellKey {
-            frame_id: 99,
-            ..key(2, 1, 1, 1)
-        })
-        .is_err());
+        assert_eq!(plan(&key(22, 0, 0, 0)), Plan::Empty);
+        // Other frames, declared or not.
+        for frame_id in [3, 99] {
+            assert_eq!(
+                plan(&CellKey {
+                    frame_id,
+                    ..key(2, 1, 1, 1)
+                }),
+                Plan::Empty
+            );
+        }
         // The whole frame needs the top level, both tiles.
         match plan(&key(0, 0, 0, 0)) {
-            Ok(Plan::Surface { level: 10, tiles }) => assert_eq!(tiles.len(), 2),
+            Plan::Surface { level: 10, tiles } => assert_eq!(tiles.len(), 2),
             other => panic!("{other:?}"),
         }
     }

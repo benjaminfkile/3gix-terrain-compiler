@@ -10,9 +10,9 @@ publish = false
 # Pinned by revision. Without default features: the library's own C ABI and
 # wasm-bindgen exports would bring imports into a module (core
 # docs/modules.md).
-gx-core = { git = "https://github.com/benjaminfkile/3gix-core", rev = "67fa5f510dc306c49f576baffeee8fa87d3fc337", default-features = false }
+gx-core = { git = "https://github.com/benjaminfkile/3gix-core", rev = "930c9ad97a8bd2e720c100284174e5c8203a0fca", default-features = false }
 # The module ABI guest kit (core docs/modules.md), from the same revision.
-gx-module-guest = { git = "https://github.com/benjaminfkile/3gix-core", rev = "67fa5f510dc306c49f576baffeee8fa87d3fc337" }
+gx-module-guest = { git = "https://github.com/benjaminfkile/3gix-core", rev = "930c9ad97a8bd2e720c100284174e5c8203a0fca" }
 # The same pin as gx-core (core docs/determinism.md): the compressed tile
 # bytes depend on the zstd crate, its bundled C library, and the level.
 zstd = "=0.14.0"
