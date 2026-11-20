@@ -2,7 +2,7 @@
 
 A 3GIX compiler module that builds the matter of one frame from elevation data, plus the tool that cuts the elevation grid into source tiles. See the 3GIXHub architecture docs (`space-model.md`, `client-compute.md`, `matter-format.md`).
 
-The module implements `space-model.md` section 11 item 2: attached exclusively to the third planet's frame (frame 4 of the system module's registry; the layer config chooses the frame), it builds that frame's whole matter, solid rock up to the elevation surface on the WGS84 ellipsoid with the Preliminary Reference Earth Model's density below, and no water. The tiler implements the source data side of `client-compute.md` section 5: it cuts one pyramid from the Copernicus GLO-30 digital elevation model on land and the GEBCO global grid under the oceans (and can still cut a GEBCO only pyramid).
+The module implements item 2 of the v2 milestone (`docs/universe/first-universe.md` in the hub repository): attached exclusively to the third planet's frame (frame 4 of the system module's registry; the layer config chooses the frame), it builds that frame's whole matter, solid rock up to the elevation surface on the WGS84 ellipsoid with the Preliminary Reference Earth Model's density below, and no water. The tiler implements the source data side of `client-compute.md` section 5: it cuts one pyramid from the Copernicus GLO-30 digital elevation model on land and the GEBCO global grid under the oceans (and can still cut a GEBCO only pyramid).
 
 Compilers are allowed to know what things are. This one knows it builds a planet's crust and interior; nothing it emits says so.
 
